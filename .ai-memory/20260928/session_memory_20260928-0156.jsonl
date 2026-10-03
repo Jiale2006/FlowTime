@@ -1,0 +1,7 @@
+{"type":"session_summary","id":"20260928-0156","project":"FlowTime(心流时间)","goal":"按教程+示例图完成番茄专注 App","outcome":"首版完成：17 个 Kotlin 文件 + 镜像化构建链；assembleDebug 通过；模拟器验证 6 项核心链路通过","pause_reason":"用户暂停：剩下的明天弄"}
+{"type":"decision","key":"ui_stack","value":"纯 Jetpack Compose + MVVM + Navigation Compose","revert_if":"用户要求按教程 XML/Fragment 路线重做"}
+{"type":"decision","key":"persistence","value":"DataStore Preferences + org.json 序列化（任务/记录/设置）","revert_if":"数据关系复杂化需查询时迁 Room"}
+{"type":"decision","key":"deps","value":"navigation-compose 2.10.2 / lifecycle-viewmodel-compose 2.11.0 / datastore-preferences 1.2.1（均在阿里云镜像实测存在）","revert_if":"版本冲突时按镜像 maven-metadata 重选"}
+{"type":"known_issue","key":"gradlew_bat_empty_classpath","value":"本机 Oracle JDK 17.0.2 拒绝 -classpath \"\"，已补丁 gradlew.bat（CLASSPATH=wrapper jar）；升级 wrapper 会覆盖需重打","severity":"低"}
+{"type":"known_issue","key":"completion_achievement_streak","value":"完成页成就判定读 records 流可能早于入库反射，streak 偶发少算 1 次；初次心流判定不受影响","severity":"低"}
+{"type":"next_steps","value":"见 .ai-memory/handoff.md 未完成清单 1-4"}

@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <!-- 心流时间深色主题（教程 §4.2） -->
+    <color name="bg_primary">#131715</color>
+    <color name="primary">#63C77F</color>
+    <color name="primary_dark">#2E7D42</color>
+    <color name="primary_light">#449959</color>
+    <color name="accent_green">#70C285</color>
+    <color name="card_green_light">#2A3A2E</color>
+    <color name="card_orange">#4A3A28</color>
+    <color name="card_cream">#33342C</color>
+    <color name="gold">#F2C94C</color>
+    <color name="text_primary">#EDF2EC</color>
+    <color name="text_secondary">#A9B5AB</color>
+    <color name="text_placeholder">#6E7B70</color>
+    <color name="divider">#3A403C</color>
+    <color name="error">#D64545</color>
+    <color name="warning">#E8A33D</color>
+    <color name="success">#2E9E5B</color>
+    <color name="disabled">#4A524B</color>
+</resources>

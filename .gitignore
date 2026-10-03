@@ -1,0 +1,15 @@
+*.iml
+.gradle
+/local.properties
+local.properties
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+
+# IDE 配置整个排除
+/.idea/
+
+# 开发文档暂不入库（想提交就删掉这行）
+/doc/

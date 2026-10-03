@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  不声明 <monochrome>：水彩插画没有可用的单色剪影，硬塞彩色图层会在 Android 13+
+  主题图标下变成一整块实心色块，不如让主题图标直接回退到本彩色图标。
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
