@@ -12,8 +12,9 @@ import com.example.flowtime.ui.theme.WatercolorSand
 import com.example.flowtime.ui.theme.WatercolorTeal
 
 /**
- * 水彩晕染底：多组 radial-gradient 色块叠加，模拟颜料在湿纸上向外扩散渗透。
- * 全部为低透明度叠加（水彩透明性），且静止不动 → 天然满足 reduced-motion。
+ * 水彩晕染底（水彩画风主题的场景层）：多组 radial-gradient 色块叠加，
+ * 模拟颜料在湿纸上向外扩散渗透。全部为低透明度叠加（水彩透明性），
+ * 且静止不动 → 天然满足 reduced-motion。
  */
 @Composable
 fun WatercolorBloom(modifier: Modifier = Modifier) {

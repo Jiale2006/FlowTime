@@ -24,7 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material3.AlertDialog
+import com.example.flowtime.ui.components.FlowAlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilterChip
@@ -445,7 +445,7 @@ private fun BackfillDialog(
     val minutes = minutesText.toIntOrNull() ?: 0
     val valid = dateMillis != null && minutes in 1..480
 
-    AlertDialog(
+    FlowAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("补录时间", fontWeight = FontWeight.Medium) },
         text = {

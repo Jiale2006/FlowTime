@@ -25,8 +25,8 @@ object Dimens {
     val ScreenTopGap = 20.dp
 
     // ---- 卡片 ----
-    /** 卡片圆角（大圆角保留水彩风，但比原来的 24dp 收一档） */
-    val CardRadius = 20.dp
+    /** 卡片圆角（rounded-3xl 档：玻璃卡的大圆角，直角与小圆角都会破坏玻璃感） */
+    val CardRadius = 24.dp
     /** 大卡片内容内边距 */
     val CardPadding = 16.dp
     /** 紧凑卡片（任务网格块）内边距 */

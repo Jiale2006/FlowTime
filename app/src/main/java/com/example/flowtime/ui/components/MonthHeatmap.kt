@@ -38,14 +38,15 @@ import com.example.flowtime.ui.theme.TextSecondary
 
 private val WeekLabels = listOf("一", "二", "三", "四", "五", "六", "日")
 
-/** 色阶图例（由浅到深，与 heatColor 一一对应） */
-private val HeatLegend = listOf(
-    CardCream,
-    AccentGreen.copy(alpha = 0.35f),
-    AccentGreen.copy(alpha = 0.55f),
-    PrimaryLight.copy(alpha = 0.6f),
-    Primary.copy(alpha = 0.75f),
-)
+/** 色阶图例（由浅到深，与 heatColor 一一对应）；读取器形式，主题切换时取到当前色 */
+private val HeatLegend: List<Color>
+    get() = listOf(
+        CardCream,
+        AccentGreen.copy(alpha = 0.35f),
+        AccentGreen.copy(alpha = 0.55f),
+        PrimaryLight.copy(alpha = 0.6f),
+        Primary.copy(alpha = 0.75f),
+    )
 
 /**
  * 近 30 天热力图（水彩画风）：7 列（一~日）× 5 行圆角格子，格子颜色深浅代表当日专注时长。

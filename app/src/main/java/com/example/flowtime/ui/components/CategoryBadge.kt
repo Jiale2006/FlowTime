@@ -9,6 +9,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.CardCream
 import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.TextSecondary
@@ -44,7 +45,7 @@ fun CategoryBadge(
         color = fg,
         maxLines = 1,
         modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
+            .clip(ActivePalette.badgeShape)
             .background(bg)
             .padding(horizontal = 8.dp, vertical = 3.dp),
     )

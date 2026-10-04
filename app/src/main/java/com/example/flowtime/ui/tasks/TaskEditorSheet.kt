@@ -25,7 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material3.AlertDialog
+import com.example.flowtime.ui.components.FlowAlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -352,7 +352,7 @@ internal fun TaskEditorSheet(
     }
 
     if (confirmDiscard) {
-        AlertDialog(
+        FlowAlertDialog(
             onDismissRequest = { confirmDiscard = false },
             title = { Text("放弃这次编辑？", fontWeight = FontWeight.Medium) },
             text = {

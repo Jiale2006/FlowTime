@@ -14,6 +14,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,14 +36,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.VolumeUp
-import androidx.compose.material3.AlertDialog
+import com.example.flowtime.ui.components.FlowAlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -83,21 +86,27 @@ import com.example.flowtime.data.AppSettings
 import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.components.ProCard
 import com.example.flowtime.ui.components.pressScale
+import com.example.flowtime.ui.components.sketchStroke
+import com.example.flowtime.ui.theme.ActivePalette
+import com.example.flowtime.ui.theme.AllPalettes
+import com.example.flowtime.ui.theme.AppPalette
 import com.example.flowtime.ui.theme.AccentGreen
 import com.example.flowtime.ui.theme.CardCream
 import com.example.flowtime.ui.theme.CardGreenLight
 import com.example.flowtime.ui.theme.Dimens
 import com.example.flowtime.ui.theme.DisabledGray
+import com.example.flowtime.ui.theme.DividerColor
 import com.example.flowtime.ui.theme.Gold
 import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.PrimaryDark
 import com.example.flowtime.ui.theme.TextPrimary
 import com.example.flowtime.ui.theme.TextSecondary
+import com.example.flowtime.ui.theme.ThemeMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-private enum class SettingsDialog { PROFILE, DURATION, POMODORO, RINGTONE, REMINDER, BACKUP, ABOUT }
+private enum class SettingsDialog { PROFILE, THEME, DURATION, POMODORO, RINGTONE, REMINDER, BACKUP, ABOUT }
 
 /**
  * 设置页：个人资料（头像 + 昵称）/ 专注时长 / 番茄计时参数 / 番茄铃声 / 习惯提醒（真实本地通知）/ 关于。
@@ -105,6 +114,7 @@ private enum class SettingsDialog { PROFILE, DURATION, POMODORO, RINGTONE, REMIN
 @Composable
 fun SettingsScreen(viewModel: AppViewModel) {
     val settings by viewModel.settings.collectAsState()
+    val themeMode by viewModel.themeMode.collectAsState()
     val context = LocalContext.current
     var dialog by remember { mutableStateOf<SettingsDialog?>(null) }
 
@@ -201,12 +211,27 @@ fun SettingsScreen(viewModel: AppViewModel) {
             }
             Spacer(Modifier.height(Dimens.SectionGap))
 
+            SectionTitle("外观")
+
+            // 主题：点进去的选择界面（弹层列表式，加新主题只要往 AllPalettes 里放）。
+            // 点击选项立即生效并持久化，全 app 的 token 是快照状态，下一帧整体换装。
+            SettingsCard(onClick = { dialog = SettingsDialog.THEME }) {
+                IconChip(Icons.Default.Palette)
+                Spacer(Modifier.width(Dimens.IconTextGap))
+                Column(Modifier.weight(1f)) {
+                    Text("主题", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+                    Text("${ActivePalette.label} · ${ActivePalette.tagline}", fontSize = 13.sp, color = TextSecondary)
+                }
+                Chevron()
+            }
+            Spacer(Modifier.height(Dimens.CardGap))
+
             SectionTitle("专注")
 
-            // 默认专注时长（渐变高亮卡）
+            // 默认专注时长（主题横幅高亮卡：笔刷随主题走——水彩/夜航渐变，涂鸦扁平墨色）
             Surface(
                 modifier = Modifier.fillMaxWidth().pressScale().clickable { dialog = SettingsDialog.DURATION },
-                shape = RoundedCornerShape(Dimens.CardRadius),
+                shape = ActivePalette.cardShape,
                 color = Color.Transparent,
                 shadowElevation = 0.dp,
             ) {
@@ -214,8 +239,8 @@ fun SettingsScreen(viewModel: AppViewModel) {
                     Modifier
                         .fillMaxWidth()
                         .background(
-                            Brush.horizontalGradient(listOf(Primary, PrimaryDark)),
-                            RoundedCornerShape(Dimens.CardRadius),
+                            ActivePalette.bannerBrush,
+                            ActivePalette.cardShape,
                         )
                         .padding(Dimens.RowPadding),
                     verticalAlignment = Alignment.CenterVertically,
@@ -223,7 +248,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
                     Box(
                         modifier = Modifier
                             .size(Dimens.IconChip)
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(ActivePalette.badgeShape)
                             .background(Color.White.copy(alpha = 0.18f)),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -369,6 +394,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
 
     when (dialog) {
         SettingsDialog.PROFILE -> ProfileDialog(viewModel) { dialog = null }
+        SettingsDialog.THEME -> ThemePickerDialog(themeMode, viewModel) { dialog = null }
         SettingsDialog.DURATION -> DurationDialog(settings, viewModel) { dialog = null }
         SettingsDialog.POMODORO -> PomodoroDialog(settings, viewModel) { dialog = null }
         SettingsDialog.RINGTONE -> RingtoneDialog(settings, viewModel) { dialog = null }
@@ -391,7 +417,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
 
     // 恢复前二次确认：覆盖不可撤销
     pendingRestoreUri?.let { uri ->
-        AlertDialog(
+        FlowAlertDialog(
             onDismissRequest = { pendingRestoreUri = null },
             title = { Text("恢复备份", fontWeight = FontWeight.Medium) },
             text = {
@@ -447,7 +473,7 @@ private fun IconChip(icon: ImageVector) {
     Box(
         modifier = Modifier
             .size(Dimens.IconChip)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(ActivePalette.badgeShape)
             .background(CardGreenLight),
         contentAlignment = Alignment.Center,
     ) {
@@ -463,6 +489,88 @@ private fun Chevron() {
         tint = TextSecondary,
         modifier = Modifier.padding(start = 4.dp),
     )
+}
+
+/** 主题选择弹层：列出全部主题（AllPalettes 顺序），色点预览 + 名称，点选即换 */
+@Composable
+private fun ThemePickerDialog(
+    current: ThemeMode,
+    viewModel: AppViewModel,
+    onDismiss: () -> Unit,
+) {
+    FlowAlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择主题", fontWeight = FontWeight.Medium) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                AllPalettes.forEach { palette ->
+                    ThemeOptionRow(
+                        palette = palette,
+                        selected = palette.mode == current,
+                        onClick = {
+                            viewModel.setThemeMode(palette.mode)
+                            onDismiss()
+                        },
+                    )
+                }
+                Text(
+                    "切换立即生效，重启应用后保持",
+                    fontSize = 12.sp,
+                    color = TextSecondary,
+                )
+            }
+        },
+        confirmButton = {},
+    )
+}
+
+/** 弹层里的单个主题选项：色点 + 名称 + 一句话风格，选中 = 淡彩底 + 勾 */
+@Composable
+private fun ThemeOptionRow(
+    palette: AppPalette,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(ActivePalette.tileShape)
+            .background(if (selected) CardGreenLight else Color.Transparent)
+            .sketchStroke(
+                ActivePalette.tileShape,
+                if (selected) Primary else DividerColor,
+                1.dp,
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row {
+            palette.previewDots.forEachIndexed { index, dot ->
+                if (index > 0) Spacer(Modifier.width(5.dp))
+                Box(
+                    Modifier
+                        .size(11.dp)
+                        .clip(CircleShape)
+                        .background(dot)
+                        .border(1.dp, DividerColor, CircleShape),
+                )
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                palette.label,
+                fontSize = 14.sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                color = if (selected) Primary else TextPrimary,
+            )
+            Text(palette.tagline, fontSize = 11.sp, color = TextSecondary)
+        }
+        if (selected) {
+            Icon(Icons.Default.Check, contentDescription = "已选择", tint = Primary)
+        }
+    }
 }
 
 /** 圆形头像：有图用图，没图用默认人像图标；换头像后按文件名重新解码 */
@@ -538,7 +646,7 @@ private fun ProfileDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
         pickImage.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     }
 
-    AlertDialog(
+    FlowAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("个人资料", fontWeight = FontWeight.Medium) },
         text = {
@@ -597,7 +705,7 @@ private fun DurationDialog(settings: AppSettings, viewModel: AppViewModel, onDis
     val finalMinutes = if (isCustom) custom.toIntOrNull() ?: 0 else selected
     val valid = finalMinutes in 1..240
 
-    AlertDialog(
+    FlowAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("默认专注时长", fontWeight = FontWeight.Medium) },
         text = {
@@ -652,7 +760,7 @@ private fun PomodoroDialog(settings: AppSettings, viewModel: AppViewModel, onDis
     var longBreak by remember { mutableStateOf(settings.pomodoroLongBreakMinutes) }
     var rounds by remember { mutableStateOf(settings.pomodoroRoundsBeforeLongBreak) }
 
-    AlertDialog(
+    FlowAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("番茄计时", fontWeight = FontWeight.Medium) },
         text = {
@@ -727,7 +835,7 @@ private fun PomodoroDialog(settings: AppSettings, viewModel: AppViewModel, onDis
 private fun RingtoneDialog(settings: AppSettings, viewModel: AppViewModel, onDismiss: () -> Unit) {
     var ringtone by remember { mutableStateOf(settings.ringtoneEnabled) }
     var autoStart by remember { mutableStateOf(settings.autoStart) }
-    AlertDialog(
+    FlowAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("番茄铃声", fontWeight = FontWeight.Medium) },
         text = {
@@ -792,7 +900,7 @@ private fun ReminderDialog(
     val timeValid = Regex("^([01]\\d|2[0-3]):[0-5]\\d$").matches(time)
     val valid = timeValid
 
-    AlertDialog(
+    FlowAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("习惯提醒", fontWeight = FontWeight.Medium) },
         text = {
@@ -859,7 +967,7 @@ private fun BackupDialog(
     onRestore: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
+    FlowAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("数据备份", fontWeight = FontWeight.Medium) },
         text = {
@@ -890,7 +998,7 @@ private fun BackupDialog(
 
 @Composable
 private fun AboutDialog(version: String, onDismiss: () -> Unit) {
-    AlertDialog(
+    FlowAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("关于心流时间", fontWeight = FontWeight.Medium) },
         text = {

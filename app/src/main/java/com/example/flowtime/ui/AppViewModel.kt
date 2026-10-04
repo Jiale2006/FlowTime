@@ -20,6 +20,7 @@ import com.example.flowtime.data.FlowTimeRepository
 import com.example.flowtime.data.FocusRecord
 import com.example.flowtime.data.FocusTask
 import com.example.flowtime.data.RecordLink
+import com.example.flowtime.ui.theme.ThemeMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -51,6 +52,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         repo.records.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val settings: StateFlow<AppSettings> =
         repo.settings.stateIn(viewModelScope, SharingStarted.Eagerly, AppSettings())
+
+    // ---- 界面主题 ----
+
+    /** 当前主题（持久化；设置页切换后全 app 换装） */
+    val themeMode: StateFlow<ThemeMode> = settings
+        .map { parseThemeMode(it.themeMode) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, ThemeMode.NOCTURNE)
+
+    fun setThemeMode(mode: ThemeMode) {
+        viewModelScope.launch { repo.updateSettings(settings.value.copy(themeMode = mode.name)) }
+    }
+
+    private fun parseThemeMode(raw: String): ThemeMode =
+        runCatching { ThemeMode.valueOf(raw) }.getOrDefault(ThemeMode.NOCTURNE)
+
     /**
      * 「分类」= 顶层且已挂有小任务的任务（衍生视图，不再单独存储）。
      * 任何任务点进去加了小任务，它就成为分类。

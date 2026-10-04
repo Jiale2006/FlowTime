@@ -16,8 +16,11 @@ import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material.icons.Icons
@@ -49,7 +52,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.completion.CompletionScreen
-import com.example.flowtime.ui.components.WatercolorBloom
+import com.example.flowtime.ui.components.ThemeBackdrop
 import com.example.flowtime.ui.settings.SettingsScreen
 import com.example.flowtime.ui.stats.StatsScreen
 import com.example.flowtime.ui.tasks.TaskDetailScreen
@@ -57,8 +60,10 @@ import com.example.flowtime.ui.tasks.TasksScreen
 import com.example.flowtime.ui.theme.AdaptiveScale
 import com.example.flowtime.ui.theme.BgPrimary
 import com.example.flowtime.ui.theme.CardGreenLight
+import com.example.flowtime.ui.theme.DividerColor
 import com.example.flowtime.ui.theme.FlowTimeTheme
-import com.example.flowtime.ui.theme.PaperElevated
+import com.example.flowtime.ui.theme.NavContainer
+import com.example.flowtime.ui.theme.NavItemUnselected
 import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.timer.TimerScreen
 
@@ -67,10 +72,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            FlowTimeTheme {
+            val viewModel: AppViewModel = viewModel()
+            val themeMode by viewModel.themeMode.collectAsState()
+            // 状态栏/导航栏图标颜色、窗口底色由 FlowTimeTheme 随主题处理
+            FlowTimeTheme(themeMode) {
                 // 窄屏等比缩放：让手机上的观感与设计基准（440dp 宽）一致
                 AdaptiveScale {
-                    FlowTimeApp()
+                    FlowTimeApp(viewModel)
                 }
             }
         }
@@ -131,32 +139,41 @@ fun FlowTimeApp(viewModel: AppViewModel = viewModel()) {
                 currentRoute?.startsWith(Routes.TASK_DETAIL) != true &&
                 currentRoute?.startsWith(Routes.CATEGORY_DETAIL) != true
             ) {
-                NavigationBar(containerColor = PaperElevated, tonalElevation = 0.dp) {
-                    tabs.forEach { tab ->
-                        NavigationBarItem(
-                            selected = currentRoute == tab.route,
-                            onClick = {
-                                if (currentRoute != tab.route) {
-                                    navController.navigate(tab.route) {
-                                        popUpTo(navController.graph.findStartDestination().id) {
-                                            saveState = true
+                Column {
+                    // 玻璃导航条顶边的受光细线（水彩主题下是蓝灰分隔线）
+                    Box(Modifier.fillMaxWidth().height(1.dp).background(DividerColor))
+                    NavigationBar(
+                        containerColor = NavContainer,
+                        tonalElevation = 0.dp,
+                    ) {
+                        tabs.forEach { tab ->
+                            NavigationBarItem(
+                                selected = currentRoute == tab.route,
+                                onClick = {
+                                    if (currentRoute != tab.route) {
+                                        navController.navigate(tab.route) {
+                                            popUpTo(navController.graph.findStartDestination().id) {
+                                                saveState = true
+                                            }
+                                            launchSingleTop = true
+                                            restoreState = true
                                         }
-                                        launchSingleTop = true
-                                        restoreState = true
                                     }
-                                }
-                            },
-                            icon = { Icon(tab.icon, contentDescription = tab.label) },
-                            label = { Text(tab.label) },
-                            alwaysShowLabel = true,
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = Primary,
-                                selectedTextColor = Primary,
-                                unselectedIconColor = Color(0x99000000),
-                                unselectedTextColor = Color(0x99000000),
-                                indicatorColor = CardGreenLight,
-                            ),
-                        )
+                                },
+                                icon = { Icon(tab.icon, contentDescription = tab.label) },
+                                label = { Text(tab.label) },
+                                alwaysShowLabel = true,
+                                // 选中态只变颜色：指示器设为透明（图标/文字位置前后不动，
+                                // 不出现"点到谁谁跳一下"和药丸色块）
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = Primary,
+                                    selectedTextColor = Primary,
+                                    unselectedIconColor = NavItemUnselected,
+                                    unselectedTextColor = NavItemUnselected,
+                                    indicatorColor = Color.Transparent,
+                                ),
+                            )
+                        }
                     }
                 }
             }
@@ -256,7 +273,7 @@ fun FlowTimeApp(viewModel: AppViewModel = viewModel()) {
 @Composable
 private fun TabPage(innerPadding: PaddingValues, content: @Composable () -> Unit) {
     Box(Modifier.fillMaxSize().background(BgPrimary)) {
-        WatercolorBloom(Modifier.matchParentSize())
+        ThemeBackdrop(Modifier.matchParentSize())
         Box(Modifier.fillMaxSize().padding(innerPadding)) { content() }
     }
 }
@@ -271,7 +288,7 @@ private fun TabPage(innerPadding: PaddingValues, content: @Composable () -> Unit
 @Composable
 private fun FullPage(content: @Composable () -> Unit) {
     Box(Modifier.fillMaxSize().background(BgPrimary)) {
-        WatercolorBloom(Modifier.matchParentSize())
+        ThemeBackdrop(Modifier.matchParentSize())
         Box(Modifier.fillMaxSize().systemBarsPadding()) { content() }
     }
 }

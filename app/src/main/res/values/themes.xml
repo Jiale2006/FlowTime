@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-
-    <style name="Theme.FlowTime" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- 夜航玻璃：深墨蓝窗口底，冷启动不闪白；图标浅色由 enableEdgeToEdge 控制 -->
+    <style name="Theme.FlowTime" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#0B1322</item>
+    </style>
 </resources>

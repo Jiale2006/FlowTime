@@ -29,7 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material3.AlertDialog
+import com.example.flowtime.ui.components.FlowAlertDialog
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -65,6 +65,7 @@ import com.example.flowtime.ui.components.ProCard
 import com.example.flowtime.ui.components.WeeklyBarsPager
 import com.example.flowtime.ui.components.formatMinutesHm
 import com.example.flowtime.ui.components.pressScale
+import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.AccentGreen
 import com.example.flowtime.ui.theme.CardCream
 import com.example.flowtime.ui.theme.CardGreenLight
@@ -367,7 +368,7 @@ fun StatsScreen(viewModel: AppViewModel) {
     }
 
     if (showExportDialog) {
-        AlertDialog(
+        FlowAlertDialog(
             onDismissRequest = { showExportDialog = false },
             title = { Text("导出 CSV", fontWeight = FontWeight.Medium) },
             text = {
@@ -451,7 +452,7 @@ private fun GoalCard(
                 Modifier
                     .fillMaxWidth()
                     .height(10.dp)
-                    .clip(RoundedCornerShape(50))
+                    .clip(ActivePalette.pillShape)
                     .background(CardCream),
             ) {
                 if (progress > 0f) {
@@ -459,7 +460,7 @@ private fun GoalCard(
                         Modifier
                             .fillMaxWidth(progress)
                             .height(10.dp)
-                            .clip(RoundedCornerShape(50))
+                            .clip(ActivePalette.pillShape)
                             .background(Brush.horizontalGradient(listOf(AccentGreen, Primary))),
                     )
                 }
@@ -489,12 +490,12 @@ private fun RangeChip(
 ) {
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(50))
+            .clip(ActivePalette.pillShape)
             .background(if (selected) CardGreenLight else Color.Transparent)
             .border(
                 width = 1.dp,
                 color = if (selected) Color.Transparent else DividerColor,
-                shape = RoundedCornerShape(50),
+                shape = ActivePalette.pillShape,
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 13.dp, vertical = 6.dp),
@@ -517,7 +518,7 @@ private fun OverviewItem(
 ) {
     Column(
         modifier = modifier
-            .clip(RoundedCornerShape(16.dp))
+            .clip(ActivePalette.tileShape)
             .background(CardCream)
             .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
@@ -672,5 +673,6 @@ private fun StatCard(
     }
 }
 
-/** 圆环图配色（按任务时长降序循环取色） */
-private val DonutColors = listOf(Primary, AccentGreen, WarningAmber, Gold, PrimaryLight, SuccessGreen)
+/** 圆环图配色（按任务时长降序循环取色）；读取器形式，主题切换时取到当前色 */
+private val DonutColors: List<Color>
+    get() = listOf(Primary, AccentGreen, WarningAmber, Gold, PrimaryLight, SuccessGreen)

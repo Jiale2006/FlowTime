@@ -60,6 +60,7 @@ class FlowTimeRepository(private val context: Context) {
         val DAILY_GOAL = intPreferencesKey("daily_goal_minutes")
         val REMINDER = stringPreferencesKey("reminder_time")
         val STATS_RANGE = stringPreferencesKey("stats_range")
+        val THEME_MODE = stringPreferencesKey("theme_mode")
     }
 
     val tasks: Flow<List<FocusTask>> = dao.tasks()
@@ -82,6 +83,7 @@ class FlowTimeRepository(private val context: Context) {
             pomodoroRoundsBeforeLongBreak = prefs[Keys.POMODORO_ROUNDS] ?: 4,
             pomodoroTipShown = prefs[Keys.POMODORO_TIP_SHOWN] ?: false,
             statsRange = prefs[Keys.STATS_RANGE] ?: "WEEK",
+            themeMode = prefs[Keys.THEME_MODE] ?: "NOCTURNE",
         )
     }
 
@@ -197,6 +199,7 @@ class FlowTimeRepository(private val context: Context) {
             prefs[Keys.POMODORO_ROUNDS] = settings.pomodoroRoundsBeforeLongBreak
             prefs[Keys.POMODORO_TIP_SHOWN] = settings.pomodoroTipShown
             prefs[Keys.STATS_RANGE] = settings.statsRange
+            prefs[Keys.THEME_MODE] = settings.themeMode
         }
     }
 

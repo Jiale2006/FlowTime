@@ -29,7 +29,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material3.AlertDialog
+import com.example.flowtime.ui.components.FlowAlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -72,6 +72,7 @@ import com.example.flowtime.ui.components.RingTimer
 import com.example.flowtime.ui.components.pressScale
 import com.example.flowtime.ui.components.rememberAmbientParticlesState
 import com.example.flowtime.ui.components.rememberReducedMotion
+import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.AccentGreen
 import com.example.flowtime.ui.theme.BorderColor
 import com.example.flowtime.ui.theme.CardGreenLight
@@ -155,7 +156,7 @@ fun TimerScreen(
                         Box(
                             modifier = Modifier
                                 .size(40.dp)
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(ActivePalette.badgeShape)
                                 .background(
                                     task?.let { TaskCardPalette[it.colorIndex % TaskCardPalette.size].first }
                                         ?: MutedSurface,
@@ -212,7 +213,7 @@ fun TimerScreen(
                         Box(
                             modifier = Modifier
                                 .size(Dimens.IconChip)
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(ActivePalette.badgeShape)
                                 .background(CardGreenLight.copy(alpha = 0.6f)),
                             contentAlignment = Alignment.Center,
                         ) {
@@ -278,6 +279,7 @@ fun TimerScreen(
                 }
                 RingTimer(
                     progress = if (isIdle) 1f else timer.progress,
+                    pigmentProgress = timer.progress,
                     timeText = formatClock(displayMillis),
                     modifier = Modifier.fillMaxHeight(0.94f),
                     breathing = timer.phase == AppViewModel.TimerPhase.RUNNING && !reducedMotion,
@@ -347,7 +349,7 @@ fun TimerScreen(
                             .weight(1f)
                             .height(Dimens.ButtonHeightHero)
                             .pressScale(),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = ActivePalette.buttonShape,
                         colors = ButtonDefaults.buttonColors(containerColor = Primary),
                     ) {
                         Text("开始专注", fontSize = 16.sp, fontWeight = FontWeight.Light)
@@ -368,7 +370,7 @@ fun TimerScreen(
                                 // 而且 softShadow 投在透明底的元素上时，阴影轮廓会退化成矩形，
                                 // 隔着透明底看就是按钮里的一块方角色斑（已实测复现）。
                                 .pressScale(),
-                            shape = RoundedCornerShape(16.dp),
+                            shape = ActivePalette.buttonShape,
                             border = BorderStroke(1.dp, BorderColor),
                         ) {
                             Text(
@@ -389,7 +391,7 @@ fun TimerScreen(
                     OutlinedButton(
                         onClick = { showCancelConfirm = true },
                         modifier = Modifier.weight(1f).height(Dimens.ButtonHeight).pressScale(),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = ActivePalette.buttonShape,
                         border = BorderStroke(1.dp, ErrorRed),
                     ) {
                         Text("取消", color = ErrorRed, fontSize = 15.sp, fontWeight = FontWeight.Medium)
@@ -400,7 +402,7 @@ fun TimerScreen(
                             .weight(1f)
                             .height(Dimens.ButtonHeight)
                             .pressScale(),
-                        shape = RoundedCornerShape(16.dp),
+                        shape = ActivePalette.buttonShape,
                         colors = ButtonDefaults.buttonColors(containerColor = Primary),
                     ) {
                         Text(
@@ -420,7 +422,7 @@ fun TimerScreen(
     }
 
     if (showCancelConfirm) {
-        AlertDialog(
+        FlowAlertDialog(
             onDismissRequest = { showCancelConfirm = false },
             title = { Text("取消计时", fontWeight = FontWeight.Medium) },
             text = {
@@ -451,7 +453,7 @@ fun TimerScreen(
     if (showCustomDuration) {
         var customMinutes by remember { mutableStateOf(selectedDuration.toString()) }
         val customValid = (customMinutes.toIntOrNull() ?: 0) in 1..480
-        AlertDialog(
+        FlowAlertDialog(
             onDismissRequest = { showCustomDuration = false },
             title = { Text("自定义时长", fontWeight = FontWeight.Medium) },
             text = {
@@ -550,7 +552,7 @@ fun TimerScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(Dimens.ButtonHeight),
-                    shape = RoundedCornerShape(16.dp),
+                    shape = ActivePalette.buttonShape,
                     colors = ButtonDefaults.buttonColors(containerColor = Primary),
                 ) {
                     Text("知道了", fontSize = 15.sp, fontWeight = FontWeight.Light)
@@ -573,7 +575,7 @@ fun TimerScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(ActivePalette.buttonShape)
                         .background(if (task == null) CardGreenLight else Color.Transparent)
                         .clickable {
                             viewModel.selectFreeFocus()
@@ -585,7 +587,7 @@ fun TimerScreen(
                     Box(
                         modifier = Modifier
                             .size(32.dp)
-                            .clip(RoundedCornerShape(9.dp))
+                            .clip(ActivePalette.badgeShape)
                             .background(MutedSurface),
                         contentAlignment = Alignment.Center,
                     ) {
@@ -605,7 +607,7 @@ fun TimerScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(ActivePalette.buttonShape)
                             .background(if (selected) CardGreenLight else Color.Transparent)
                             .clickable {
                                 viewModel.selectTask(item.id)
@@ -617,7 +619,7 @@ fun TimerScreen(
                         Box(
                             modifier = Modifier
                                 .size(32.dp)
-                                .clip(RoundedCornerShape(9.dp))
+                                .clip(ActivePalette.badgeShape)
                                 .background(cardColor),
                             contentAlignment = Alignment.Center,
                         ) {

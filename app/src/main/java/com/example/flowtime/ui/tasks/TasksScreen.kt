@@ -29,7 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.List
-import androidx.compose.material3.AlertDialog
+import com.example.flowtime.ui.components.FlowAlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -59,6 +59,7 @@ import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.components.CategoryBadge
 import com.example.flowtime.ui.components.formatMinutesHm
 import com.example.flowtime.ui.components.pressScale
+import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.BorderColor
 import com.example.flowtime.ui.theme.Dimens
 import com.example.flowtime.ui.theme.ErrorRed
@@ -234,7 +235,7 @@ fun TasksScreen(
 
     pendingDelete?.let { target ->
         val childCount = childrenOf(target.id).size
-        AlertDialog(
+        FlowAlertDialog(
             onDismissRequest = { pendingDelete = null },
             title = { Text("删除任务") },
             text = {
@@ -291,7 +292,7 @@ private fun TaskCard(
             .height(Dimens.GridCardHeight)
             .pressScale()
             .combinedClickable(onClick = onClick, onLongClick = onLongClick),
-        shape = RoundedCornerShape(18.dp),
+        shape = ActivePalette.tileShape,
         colors = CardDefaults.cardColors(containerColor = bg),
         border = BorderStroke(1.dp, BorderColor),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
@@ -301,7 +302,7 @@ private fun TaskCard(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .size(Dimens.IconChipSmall)
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(ActivePalette.badgeShape)
                     .background(Color.White.copy(alpha = 0.55f)),
                 contentAlignment = Alignment.Center,
             ) {
@@ -374,7 +375,7 @@ private fun TaskListRow(
             Box(
                 modifier = Modifier
                     .size(Dimens.IconChip)
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(ActivePalette.badgeShape)
                     .background(bg),
                 contentAlignment = Alignment.Center,
             ) {

@@ -1,69 +1,379 @@
 package com.example.flowtime.ui.theme
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.unit.dp
 
-// ── 水彩画风调色板 ─────────────────────────────────────────────
+// ── 多主题体系 ─────────────────────────────────────────────────
+// 全站界面只引用本文件的 token（BgPrimary、Primary……），token 是
+// 「当前调色板 ActivePalette」的读取器；设置页切换主题时整体换装。
+// 三套主题：水彩画风 / 玻璃拟态 / 手绘涂鸦。
+// 形状与装饰也属于主题语言（卡片圆角、胶囊 chip、虚线边框、横幅笔刷），
+// 一并放进 AppPalette，组件里不允许再写死 RoundedCornerShape。
+
+/** 可切换的主题模式 */
+enum class ThemeMode { WATERCOLOR, NOCTURNE, DOODLE }
+
+/** 一套主题的全部 token：颜色 + 形状 + 装饰 */
+interface AppPalette {
+    val mode: ThemeMode
+
+    // ---- 选择器展示 ----
+    /** 选择界面里显示的名称 / 一句话风格 */
+    val label: String
+    val tagline: String
+    /** 三个预览色点 */
+    val previewDots: List<Color>
+
+    // ---- 颜色 ----
+    val bgPrimary: Color
+    val primary: Color
+    val primaryDark: Color
+    val primaryLight: Color
+    val accentGreen: Color
+    val cardGreenLight: Color
+    val cardOrange: Color
+    val cardCream: Color
+    val mutedSurface: Color
+    val gold: Color
+    val textPrimary: Color
+    val textSecondary: Color
+    val textPlaceholder: Color
+    val dividerColor: Color
+    val borderColor: Color
+    val surfaceCard: Color
+    /** 弹窗容器色（比卡片更实一层，保证可读性） */
+    val dialogContainer: Color
+    val errorRed: Color
+    val warningAmber: Color
+    val successGreen: Color
+    val disabledGray: Color
+    /** 任务卡片可选底色（底色 → 文字色，对比度 ≥4.5:1） */
+    val taskCardPalette: List<Pair<Color, Color>>
+    /** 底部导航条底色 / 未选中项色 */
+    val navContainer: Color
+    val navItemUnselected: Color
+    /** 卡片阴影墨色与透明度（水彩=晕染 blur，夜航=近黑深影，涂鸦=硬偏移不用 blur） */
+    val shadowInk: Color
+    val shadowAmbientAlpha: Float
+    val shadowSpotAlpha: Float
+    /** 品牌辅色（装饰点、徽章、烟花共用） */
+    val ink: Color
+    val peach: Color
+    val teal: Color
+    val rose: Color
+    val sand: Color
+
+    // ---- 形状 ----
+    /** 大卡（ProCard、横幅、弹层内卡片） */
+    val cardShape: Shape
+    /** 中等贴片（概览小卡、任务卡、进度条轨道） */
+    val tileShape: Shape
+    /** 小徽章（图标底块、分类标注） */
+    val badgeShape: Shape
+    /** 按钮 */
+    val buttonShape: Shape
+    /** 胶囊 chip（范围筛选等；涂鸦主题退化为小圆角——禁 rounded-full） */
+    val pillShape: Shape
+
+    // ---- 装饰 ----
+    /** 手绘风虚线描边（涂鸦主题 true，其余 false 走实线） */
+    val dashedBorders: Boolean
+    /** 主题横幅（设置页「专注设置」高亮卡）的填充笔刷 */
+    val bannerBrush: Brush
+}
+
+// ── 水彩画风（第一版）──────────────────────────────────────────
 // 纸张色底 + 蓝灰主色 + 四种半透明水彩色（蜜桃/青绿/玫瑰/沙）
 // 规则：不用纯黑、不用高饱和色、一切颜色以半透明方式叠加
+object WatercolorPalette : AppPalette {
+    override val mode = ThemeMode.WATERCOLOR
+    override val label = "水彩画风"
+    override val tagline = "纸底 · 蓝灰墨"
+    override val previewDots = listOf(Color(0xFFFAF8F5), Color(0xFF4A6FA5), Color(0xFF85CDCA))
 
-/** 水彩色（以半透明方式使用） */
-val WatercolorInk = Color(0xFF4A6FA5)    // 蓝灰：文字与主要元素
-val WatercolorPeach = Color(0xFFE8A87C)  // 蜜桃
-val WatercolorTeal = Color(0xFF85CDCA)   // 青绿
-val WatercolorRose = Color(0xFFC38D94)   // 玫瑰
-val WatercolorSand = Color(0xFFD4A373)   // 沙色
+    override val bgPrimary = Color(0xFFFAF8F5)
+    override val primary = Color(0xFF4A6FA5)
+    override val primaryDark = Color(0xFF3C5A87)
+    override val primaryLight = Color(0xFF7A98C4)
+    override val accentGreen = Color(0xFF85CDCA)
+    override val cardGreenLight = Color(0xFFDDEDEC)
+    override val cardOrange = Color(0xFFF4D9C3)
+    override val cardCream = Color(0xFFF0EBE3)
+    override val mutedSurface = Color(0xFFF3EFE9)
+    override val gold = Color(0xFFD4A373)
+    override val textPrimary = Color(0xFF3A3A3A)
+    override val textSecondary = Color(0xFF4A6FA5)
+    override val textPlaceholder = Color(0xFF8A8A8A)
+    override val dividerColor = Color(0x334A6FA5)
+    override val borderColor = Color(0x334A6FA5)
+    override val surfaceCard = Color(0xFFFCFAF7)
+    override val dialogContainer = Color(0xFFFCFAF7)
+    override val errorRed = Color(0xFFC38D94)
+    override val warningAmber = Color(0xFFD4A373)
+    override val successGreen = Color(0xFF85CDCA)
+    override val disabledGray = Color(0xFFC6C0B7)
+    override val taskCardPalette = listOf(
+        Color(0xFFE1EAF5) to textPrimary,   // 蓝灰淡
+        primary to Color.White,             // 蓝灰深
+        Color(0xFFF6E0CE) to textPrimary,   // 蜜桃淡
+        Color(0xFFDFF0EE) to textPrimary,   // 青绿淡
+        Color(0xFFF4E1E3) to textPrimary,   // 玫瑰淡
+        Color(0xFFF2E7D8) to textPrimary,   // 沙色淡
+        Color(0xFFE6EFE7) to textPrimary,   // 苔绿淡
+        Color(0xFFEDE7F2) to textPrimary,   // 淡紫
+        Color(0xFFF7EBDD) to textPrimary,   // 杏仁淡
+        Color(0xFFE3EEF0) to textPrimary,   // 湖水淡
+        Color(0xFFF1E6EA) to textPrimary,   // 藕荷淡
+        Color(0xFFE5E9F2) to textPrimary,   // 灰蓝淡
+        Color(0xFFF0E9DF) to textPrimary,   // 奶茶淡
+        Color(0xFF3F6E8C) to Color.White,   // 深青
+        Color(0xFF3C4C7C) to Color.White,   // 靛蓝
+        Color(0xFFA8724A) to Color.White,   // 焦糖
+    )
+    override val navContainer = Color(0xFFFCFAF7)
+    override val navItemUnselected = Color(0x99000000)
+    override val shadowInk = primary
+    override val shadowAmbientAlpha = 0.35f
+    override val shadowSpotAlpha = 0.28f
+    override val ink = primary
+    override val peach = Color(0xFFE8A87C)
+    override val teal = accentGreen
+    override val rose = errorRed
+    override val sand = gold
 
-/** 纸张色 */
-val PaperBase = Color(0xFFFAF8F5)
-val PaperSoft = Color(0xFFF0EBE3)
-val PaperElevated = Color(0xFFFCFAF7)
+    override val cardShape = RoundedCornerShape(20.dp)
+    override val tileShape = RoundedCornerShape(16.dp)
+    override val badgeShape = RoundedCornerShape(12.dp)
+    override val buttonShape = RoundedCornerShape(16.dp)
+    override val pillShape = RoundedCornerShape(50)
+    override val dashedBorders = false
+    override val bannerBrush = Brush.horizontalGradient(listOf(primary, primaryDark))
+}
 
-// 浅色主题
-val BgPrimary = PaperBase                  // 温暖纸张色背景
-val Primary = WatercolorInk                // 蓝灰主色
-val PrimaryDark = Color(0xFF3C5A87)
-val PrimaryLight = Color(0xFF7A98C4)
-val AccentGreen = WatercolorTeal           // 青绿（沿用旧名，值改为水彩色）
-val CardGreenLight = Color(0xFFDDEDEC)     // 青绿 20%
-val CardOrange = Color(0xFFF4D9C3)         // 蜜桃 30%
-val CardCream = PaperSoft                  // 纸张辅色
-val MutedSurface = Color(0xFFF3EFE9)
-val Gold = WatercolorSand
-val TextPrimary = Color(0xFF3A3A3A)        // 正文主色（非纯黑）
-val TextSecondary = WatercolorInk          // 正文辅色 = 蓝灰
-val TextPlaceholder = Color(0xFF8A8A8A)    // 弱化色
-val DividerColor = Color(0x334A6FA5)       // 蓝灰 20%
-val BorderColor = Color(0x334A6FA5)        // 细描边：蓝灰 20%
-val SurfaceCard = PaperElevated
-val ErrorRed = WatercolorRose              // 玫瑰（柔和警示，非刺眼红）
-val WarningAmber = WatercolorSand
-val SuccessGreen = WatercolorTeal
-val DisabledGray = Color(0xFFC6C0B7)
+// ── 玻璃拟态 / Nocturne（第二版）───────────────────────────────
+// 深墨夜景底 + 无色玻璃面板 + 唯一强调色香槟金。
+// 规则：玻璃无色（白 5%~12% 半透明），颜色全部由夜景场景承载；
+//       光有方向（顶边受光高光 / 底边背光暗缘）；禁止紫粉渐变、
+//       禁止纯黑纯白面板、禁止给玻璃本身上色。
 
-// 深色主题（暖深纸色，禁止纯黑）
-val BgPrimaryNight = Color(0xFF23211F)
-val PrimaryNight = Color(0xFFA9C0E0)
-val SurfaceNight = Color(0xFF2C2A27)
-val TextPrimaryNight = Color(0xFFEFEBE4)
-val TextSecondaryNight = Color(0xFFB6B0A6)
-val DividerNight = Color(0x33EFEBE4)
+/** 夜景场景色（背景拥有全部颜色；仅夜航场景层直接使用） */
+val NightDeep = Color(0xFF060A13)
+val NightBase = Color(0xFF0B1322)
+val SteelLift = Color(0xFF16233A)
+val MoonSteel = Color(0xFF33517A)
+val Moonlight = Color(0xFF7C9CC4)
 
-// 任务卡片可选底色：水彩淡彩 16 色（低饱和、纸上调），深色配白字，对比度 ≥4.5:1
-val TaskCardPalette = listOf(
-    Color(0xFFE1EAF5) to TextPrimary,   // 蓝灰淡
-    WatercolorInk to Color.White,       // 蓝灰深
-    Color(0xFFF6E0CE) to TextPrimary,   // 蜜桃淡
-    Color(0xFFDFF0EE) to TextPrimary,   // 青绿淡
-    Color(0xFFF4E1E3) to TextPrimary,   // 玫瑰淡
-    Color(0xFFF2E7D8) to TextPrimary,   // 沙色淡
-    Color(0xFFE6EFE7) to TextPrimary,   // 苔绿淡
-    Color(0xFFEDE7F2) to TextPrimary,   // 淡紫
-    Color(0xFFF7EBDD) to TextPrimary,   // 杏仁淡
-    Color(0xFFE3EEF0) to TextPrimary,   // 湖水淡
-    Color(0xFFF1E6EA) to TextPrimary,   // 藕荷淡
-    Color(0xFFE5E9F2) to TextPrimary,   // 灰蓝淡
-    Color(0xFFF0E9DF) to TextPrimary,   // 奶茶淡
-    Color(0xFF3F6E8C) to Color.White,   // 深青
-    Color(0xFF3C4C7C) to Color.White,   // 靛蓝
-    Color(0xFFA8724A) to Color.White,   // 焦糖
-)
+/** 玻璃表面（永远无色；仅夜航玻璃层直接使用） */
+val GlassFill = Color(0x08FFFFFF)
+val GlassFillHigh = Color(0x1FFFFFFF)
+val GlassBorder = Color(0x26FFFFFF)
+val GlassBorderHigh = Color(0x4DFFFFFF)
+val GlassInnerLight = Color(0x0DFFFFFF)
+val GlassBottomShade = Color(0x59020610)
+
+/** 唯一强调色：香槟金（只用于主 CTA、关键数字、高亮文字） */
+val Champagne = Color(0xFFE4B863)
+val ChampagneBright = Color(0xFFF3DCA8)
+val ChampagneTint = Color(0x33E4B863)
+val OnChampagne = Color(0xFF221A0E)
+
+object NocturnePalette : AppPalette {
+    override val mode = ThemeMode.NOCTURNE
+    override val label = "玻璃拟态"
+    override val tagline = "深夜 · 香槟金"
+    override val previewDots = listOf(NightBase, Champagne, GlassBorder)
+
+    override val bgPrimary = NightBase
+    override val primary = Champagne
+    override val primaryDark = MoonSteel
+    override val primaryLight = ChampagneBright
+    override val accentGreen = Moonlight
+    override val cardGreenLight = ChampagneTint
+    override val cardOrange = Color(0x2EE4B863)
+    override val cardCream = GlassFill
+    override val mutedSurface = Color(0x08FFFFFF)
+    override val gold = Color(0xFFA8823F)
+    override val textPrimary = Color(0xFFF2F5FA)
+    override val textSecondary = Color(0xFFB7C2D4)
+    override val textPlaceholder = Color(0xFF7E8BA0)
+    override val dividerColor = GlassBorder
+    override val borderColor = GlassBorder
+    override val surfaceCard = GlassFill
+    override val dialogContainer = Color(0xFF1B2A44)
+    override val errorRed = Color(0xFFD98E96)
+    override val warningAmber = Color(0xFFD9A45B)
+    override val successGreen = Color(0xFF7FB69E)
+    override val disabledGray = Color(0xFF55617A)
+    override val taskCardPalette = listOf(
+        Color(0xFF374F72) to Color.White,   // 钢蓝
+        Color(0xFF2E5A55) to Color.White,   // 深青
+        Color(0xFF6E4A50) to Color.White,   // 酒红
+        Color(0xFF565076) to Color.White,   // 暮紫
+        Color(0xFF3E5C46) to Color.White,   // 苔绿
+        Color(0xFF2F5866) to Color.White,   // 湖水
+        Color(0xFF46536B) to Color.White,   // 灰蓝
+        Color(0xFF3A4A74) to Color.White,   // 靛蓝
+        Color(0xFF7A5A38) to Color.White,   // 古铜
+        Color(0xFF8A6E46) to Color.White,   // 暗沙
+        Color(0xFF77614A) to Color.White,   // 奶茶深
+        Color(0xFF6A4A62) to Color.White,   // 藕荷深
+        Color(0xFF9A6B3E) to Color.White,   // 焦糖
+        Champagne to OnChampagne,           // 香槟（深字）
+        Color(0xFF2F5578) to Color.White,   // 深钢
+        Color(0xFF8A5A34) to Color.White,   // 杏仁深
+    )
+    override val navContainer = Color(0xD916233A)
+    override val navItemUnselected = Color(0x80FFFFFF)
+    override val shadowInk = NightDeep
+    override val shadowAmbientAlpha = 0.35f
+    override val shadowSpotAlpha = 0.32f
+    override val ink = Moonlight
+    override val peach = Color(0xFFC98F5E)
+    override val teal = Color(0xFF6FB3A6)
+    override val rose = Color(0xFFC9848F)
+    override val sand = Champagne
+
+    override val cardShape = RoundedCornerShape(24.dp)
+    override val tileShape = RoundedCornerShape(16.dp)
+    override val badgeShape = RoundedCornerShape(12.dp)
+    override val buttonShape = RoundedCornerShape(16.dp)
+    override val pillShape = RoundedCornerShape(50)
+    override val dashedBorders = false
+    override val bannerBrush = Brush.horizontalGradient(listOf(primary, primaryDark))
+}
+
+// ── 手绘涂鸦 / Hand-Drawn Doodle（第三版）──────────────────────
+// 奶白笔记本纸 + 墨黑手绘线条 + 红/蓝绿/黄三支标记笔。
+// 规则：虚线边框模拟手绘笔触；小圆角（禁 rounded-lg 及以上、禁直角）；
+//       硬边偏移阴影（禁 blur 阴影）；扁平标记笔色（禁一切渐变）；
+//       笔记本横线 + 红色页边线 + 胶带/涂鸦装饰。
+
+/** 标记笔三色 + 纸张（涂鸦场景层与强调色共用） */
+val DoodleInk = Color(0xFF2C2C2C)
+val DoodlePaper = Color(0xFFFFFEF5)
+val DoodlePaperSoft = Color(0xFFF8F7F0)
+val DoodleRed = Color(0xFFFF6B6B)
+val DoodleTeal = Color(0xFF4ECDC4)
+val DoodleYellow = Color(0xFFFFD93D)
+
+object DoodlePalette : AppPalette {
+    override val mode = ThemeMode.DOODLE
+    override val label = "手绘涂鸦"
+    override val tagline = "纸页 · 标记笔"
+    override val previewDots = listOf(DoodlePaper, DoodleRed, DoodleTeal)
+
+    override val bgPrimary = DoodlePaper
+    override val primary = DoodleInk                       // 主按钮 = 墨黑底 + 纸色字
+    override val primaryDark = Color(0xFF1F1F1F)
+    override val primaryLight = DoodleRed
+    override val accentGreen = DoodleTeal
+    override val cardGreenLight = DoodleYellow             // 选中态 = 黄色标记笔划重点
+    override val cardOrange = DoodleYellow
+    override val cardCream = DoodlePaperSoft
+    override val mutedSurface = DoodlePaperSoft
+    override val gold = DoodleRed
+    override val textPrimary = DoodleInk
+    override val textSecondary = Color(0xB32C2C2C)         // 墨 70%
+    override val textPlaceholder = Color(0x732C2C2C)       // 墨 45%
+    override val dividerColor = Color(0x592C2C2C)
+    override val borderColor = DoodleInk
+    override val surfaceCard = DoodlePaper
+    override val dialogContainer = DoodlePaper
+    override val errorRed = DoodleRed
+    override val warningAmber = DoodleYellow
+    override val successGreen = DoodleTeal
+    override val disabledGray = Color(0xFFB9B8A8)
+    override val taskCardPalette = listOf(
+        Color(0xFFFFE1E1) to textPrimary,   // 红笔淡
+        DoodleTeal to textPrimary,          // 蓝绿笔
+        DoodleYellow to textPrimary,        // 黄笔
+        DoodleRed to Color.White,           // 红笔（白字）
+        Color(0xFFFFFDF0) to textPrimary,   // 纸白
+        DoodlePaperSoft to textPrimary,     // 辅纸色
+        Color(0xFFFFE9C7) to textPrimary,   // 蜜桃纸
+        Color(0xFFD9F2EF) to textPrimary,   // 蓝绿淡
+        Color(0xFFFDE8EC) to textPrimary,   // 粉纸
+        Color(0xFFFFF9DB) to textPrimary,   // 淡黄
+        Color(0xFFE8F6F4) to textPrimary,   // 青纸
+        Color(0xFFF5EFE3) to textPrimary,   // 牛皮纸
+        Color(0xFFE3EDF9) to textPrimary,   // 蓝格纸
+        Color(0xFFDDEEDD) to textPrimary,   // 浅绿纸
+        DoodleInk to Color.White,           // 墨卡（白字）
+        Color(0xFFB9E4E0) to textPrimary,   // 深青纸
+    )
+    override val navContainer = DoodlePaper
+    override val navItemUnselected = Color(0x992C2C2C)
+    override val shadowInk = DoodleTeal                    // 涂鸦卡片走硬偏移阴影（见 ProCard）
+    override val shadowAmbientAlpha = 1f
+    override val shadowSpotAlpha = 1f
+    override val ink = DoodleInk
+    override val peach = DoodleRed
+    override val teal = DoodleTeal
+    override val rose = DoodleRed
+    override val sand = DoodleYellow
+
+    override val cardShape = RoundedCornerShape(6.dp)
+    override val tileShape = RoundedCornerShape(4.dp)
+    override val badgeShape = RoundedCornerShape(4.dp)
+    override val buttonShape = RoundedCornerShape(6.dp)
+    override val pillShape = RoundedCornerShape(4.dp)
+    override val dashedBorders = true
+    override val bannerBrush = SolidColor(primary)         // 禁渐变：扁平墨色横幅
+}
+
+/** 全部主题（选择界面按此顺序展示） */
+val AllPalettes: List<AppPalette> = listOf(WatercolorPalette, NocturnePalette, DoodlePalette)
+
+/** 当前生效的调色板（快照状态：切换后所有读取它的组合范围自动重组） */
+var ActivePalette: AppPalette by mutableStateOf(NocturnePalette)
+
+fun paletteFor(mode: ThemeMode): AppPalette =
+    when (mode) {
+        ThemeMode.WATERCOLOR -> WatercolorPalette
+        ThemeMode.NOCTURNE -> NocturnePalette
+        ThemeMode.DOODLE -> DoodlePalette
+    }
+
+// ── 全站 token（读取 ActivePalette，调用点无需感知主题切换）──────
+val BgPrimary: Color get() = ActivePalette.bgPrimary
+val Primary: Color get() = ActivePalette.primary
+val PrimaryDark: Color get() = ActivePalette.primaryDark
+val PrimaryLight: Color get() = ActivePalette.primaryLight
+val AccentGreen: Color get() = ActivePalette.accentGreen
+val CardGreenLight: Color get() = ActivePalette.cardGreenLight
+val CardOrange: Color get() = ActivePalette.cardOrange
+val CardCream: Color get() = ActivePalette.cardCream
+val MutedSurface: Color get() = ActivePalette.mutedSurface
+val Gold: Color get() = ActivePalette.gold
+val TextPrimary: Color get() = ActivePalette.textPrimary
+val TextSecondary: Color get() = ActivePalette.textSecondary
+val TextPlaceholder: Color get() = ActivePalette.textPlaceholder
+val DividerColor: Color get() = ActivePalette.dividerColor
+val BorderColor: Color get() = ActivePalette.borderColor
+val SurfaceCard: Color get() = ActivePalette.surfaceCard
+val ErrorRed: Color get() = ActivePalette.errorRed
+val WarningAmber: Color get() = ActivePalette.warningAmber
+val SuccessGreen: Color get() = ActivePalette.successGreen
+val DisabledGray: Color get() = ActivePalette.disabledGray
+val TaskCardPalette: List<Pair<Color, Color>> get() = ActivePalette.taskCardPalette
+val NavContainer: Color get() = ActivePalette.navContainer
+val NavItemUnselected: Color get() = ActivePalette.navItemUnselected
+
+/** 旧品牌色名 → 当前调色板（水彩四色 / 夜航月光 / 涂鸦标记笔） */
+val WatercolorInk: Color get() = ActivePalette.ink
+val WatercolorPeach: Color get() = ActivePalette.peach
+val WatercolorTeal: Color get() = ActivePalette.teal
+val WatercolorRose: Color get() = ActivePalette.rose
+val WatercolorSand: Color get() = ActivePalette.sand
+
+/** 历史别名（旧代码引用点保留） */
+val PaperBase: Color get() = ActivePalette.bgPrimary
+val PaperSoft: Color get() = ActivePalette.cardCream
+val PaperElevated: Color get() = ActivePalette.navContainer

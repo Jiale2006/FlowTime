@@ -71,4 +71,6 @@ data class AppSettings(
     val pomodoroTipShown: Boolean = false,
     /** 统计页范围：WEEK / MONTH / ALL（持久化，退出应用后保持上次选择） */
     val statsRange: String = "WEEK",
+    /** 界面主题：WATERCOLOR（水彩画风）/ NOCTURNE（玻璃拟态），存 ThemeMode 枚举名 */
+    val themeMode: String = "NOCTURNE",
 )
