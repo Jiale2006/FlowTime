@@ -55,8 +55,14 @@ import androidx.compose.ui.unit.sp
 import com.example.flowtime.ui.theme.AccentGreen
 import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.CardGreenLight
+import com.example.flowtime.ui.theme.Champagne
 import com.example.flowtime.ui.theme.ChampagneBright
 import com.example.flowtime.ui.theme.ErrorRed
+import com.example.flowtime.ui.theme.GlassBorder
+import com.example.flowtime.ui.theme.GlassBorderHigh
+import com.example.flowtime.ui.theme.GlassBottomShade
+import com.example.flowtime.ui.theme.GlassFillHigh
+import com.example.flowtime.ui.theme.Moonlight
 import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.PrimaryLight
 import com.example.flowtime.ui.theme.TextPrimary
@@ -111,7 +117,8 @@ fun RingTimer(
     // 其余主题的节奏等各自提示词到位后再单独调制。
     val mode = ActivePalette.mode
     val dimFadeMs = when (mode) {
-        ThemeMode.WATERCOLOR -> 600
+        // 玻璃拟态禁 duration-100/150：状态淡入淡出一律 500ms 流体缓动
+        ThemeMode.WATERCOLOR, ThemeMode.NOCTURNE -> 600
         else -> 300
     }
     val ringAlpha by animateFloatAsState(
@@ -215,6 +222,9 @@ fun RingTimer(
                 drawCircle(
                     color = if (index % 2 == 0) {
                         AccentGreen.copy(alpha = 0.35f * ringA)
+                    } else if (mode == ThemeMode.NOCTURNE) {
+                        // 玻璃主题装饰点不上色：月光 + 白 15%
+                        GlassBorder.copy(alpha = ringA)
                     } else {
                         CardGreenLight.copy(alpha = ringA)
                     },
@@ -243,16 +253,49 @@ fun RingTimer(
                 )
             }
 
-            // 底色弧
-            drawArc(
-                color = CardGreenLight.copy(alpha = 0.7f * ringA),
-                startAngle = 0f,
-                sweepAngle = 360f,
-                useCenter = false,
-                topLeft = topLeft,
-                size = arcSize,
-                style = Stroke(width = strokePx, cap = StrokeCap.Round),
-            )
+            // 底色弧。玻璃拟态 = 无色空玻璃管：白 8% 管体 + 内外管壁细边 + 顶缘受光高光
+            if (mode == ThemeMode.NOCTURNE) {
+                drawArc(
+                    color = GlassFillHigh.copy(alpha = 0.5f * ringA),
+                    startAngle = 0f, sweepAngle = 360f, useCenter = false,
+                    topLeft = topLeft, size = arcSize,
+                    style = Stroke(width = strokePx, cap = StrokeCap.Round),
+                )
+                // 管壁（内外两条白 15% 细边 = 玻璃厚度）
+                fun wallArc(insetAdj: Float, alpha: Float) {
+                    val ins = inset + insetAdj
+                    drawArc(
+                        color = GlassBorder.copy(alpha = alpha * ringA),
+                        startAngle = 0f, sweepAngle = 360f, useCenter = false,
+                        topLeft = Offset(ins, ins),
+                        size = Size(size.width - ins * 2, size.height - ins * 2),
+                        style = Stroke(width = strokePx * 0.07f),
+                    )
+                }
+                wallArc(-strokePx * 0.5f, 1f)
+                wallArc(strokePx * 0.5f, 0.7f)
+                // 顶缘受光：上半环外壁一条渐弱白高光（光从上方来）
+                drawArc(
+                    color = GlassBorderHigh.copy(alpha = 0.55f * ringA),
+                    startAngle = -150f, sweepAngle = 120f, useCenter = false,
+                    topLeft = Offset(inset - strokePx * 0.5f, inset - strokePx * 0.5f),
+                    size = Size(
+                        size.width - (inset - strokePx * 0.5f) * 2,
+                        size.height - (inset - strokePx * 0.5f) * 2,
+                    ),
+                    style = Stroke(width = strokePx * 0.14f, cap = StrokeCap.Round),
+                )
+            } else {
+                drawArc(
+                    color = CardGreenLight.copy(alpha = 0.7f * ringA),
+                    startAngle = 0f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = strokePx, cap = StrokeCap.Round),
+                )
+            }
 
             // 渐变进度弧（从顶部顺时针）：半透明叠色
             if (clamped > 0f) {
@@ -261,17 +304,19 @@ fun RingTimer(
                     colors = listOf(pigmentLight, pigmentBase, pigmentLight),
                     center = center,
                 )
-                // 主笔触
-                drawArc(
-                    brush = gradient,
-                    startAngle = -90f,
-                    sweepAngle = sweep,
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = arcSize,
-                    alpha = 0.72f * ringA,
-                    style = Stroke(width = strokePx, cap = StrokeCap.Round),
-                )
+                // 主笔触（玻璃拟态走"管内液体光"专属分支，不叠通用主笔）
+                if (mode != ThemeMode.NOCTURNE) {
+                    drawArc(
+                        brush = gradient,
+                        startAngle = -90f,
+                        sweepAngle = sweep,
+                        useCenter = false,
+                        topLeft = topLeft,
+                        size = arcSize,
+                        alpha = 0.72f * ringA,
+                        style = Stroke(width = strokePx, cap = StrokeCap.Round),
+                    )
+                }
 
                 when (mode) {
                     // 水彩：两道错位虚线的"补笔" + 内外缘沉淀细弧（渗色与边缘沉积）
@@ -333,12 +378,56 @@ fun RingTimer(
                         )
                     }
 
-                    // 玻璃拟态：一道镜面高光沿环缘缓慢扫过（玻璃的反射光）
+                    // 玻璃拟态：管内液体光（月光蓝，越紧迫越香槟）+ 管壁镜面细线 +
+                    // 白色扫光沿环缘缓行（玻璃只借光不上色：扫光不用香槟）
                     ThemeMode.NOCTURNE -> {
+                        val liquidBrush = Brush.sweepGradient(
+                            colors = listOf(
+                                pigmentBase.copy(alpha = 0.40f),
+                                pigmentBase.copy(alpha = 0.92f),
+                                lerp(pigmentBase, Moonlight, 0.5f).copy(alpha = 0.70f),
+                            ),
+                            center = center,
+                        )
+                        drawArc(
+                            brush = liquidBrush,
+                            startAngle = -90f,
+                            sweepAngle = sweep,
+                            useCenter = false,
+                            topLeft = topLeft,
+                            size = arcSize,
+                            alpha = ringA,
+                            style = Stroke(width = strokePx * 0.78f, cap = StrokeCap.Round),
+                        )
+                        // 管壁镜面细线：贴着液体偏外缘的一道白（管截面的受光反射）
+                        val specIns = inset - strokePx * 0.16f
+                        drawArc(
+                            color = Color.White,
+                            startAngle = -90f,
+                            sweepAngle = sweep,
+                            useCenter = false,
+                            topLeft = Offset(specIns, specIns),
+                            size = Size(size.width - specIns * 2, size.height - specIns * 2),
+                            alpha = 0.22f * ringA,
+                            style = Stroke(width = strokePx * 0.10f, cap = StrokeCap.Round),
+                        )
+                        // 背光暗缘：液体下缘一线近黑（inset bottom shade 的弧形版）
+                        val shadeIns = inset + strokePx * 0.24f
+                        drawArc(
+                            color = GlassBottomShade,
+                            startAngle = -90f,
+                            sweepAngle = sweep,
+                            useCenter = false,
+                            topLeft = Offset(shadeIns, shadeIns),
+                            size = Size(size.width - shadeIns * 2, size.height - shadeIns * 2),
+                            alpha = 0.5f * ringA,
+                            style = Stroke(width = strokePx * 0.12f, cap = StrokeCap.Round),
+                        )
+                        // 扫光高光：沿环缘缓慢游走的白色反光带（借场景的光，非自身颜色）
                         val phase = (frameNowMs % 9000L) / 9000f
                         val sweepCenterDeg = -90f + 360f * phase
                         drawArc(
-                            color = ChampagneBright,
+                            color = GlassBorderHigh,
                             startAngle = sweepCenterDeg - 12f,
                             sweepAngle = 24f,
                             useCenter = false,
@@ -351,7 +440,7 @@ fun RingTimer(
                             style = Stroke(width = strokePx * 1.15f, cap = StrokeCap.Round),
                         )
                         drawArc(
-                            color = ChampagneBright,
+                            color = GlassBorderHigh,
                             startAngle = sweepCenterDeg - 10f,
                             sweepAngle = 20f,
                             useCenter = false,
@@ -409,20 +498,40 @@ fun RingTimer(
                     center.x + (radius * cos(headAngle)).toFloat(),
                     center.y + (radius * sin(headAngle)).toFloat(),
                 )
-                drawCircle(
-                    color = pigmentBase.copy(alpha = 0.75f * ringA),
-                    radius = strokePx * 0.52f,
-                    center = headCenter,
-                )
-                if (doodle) {
+                if (mode == ThemeMode.NOCTURNE) {
+                    // 液面前缘 = 香槟金游标（全环唯一香槟金定点）：光晕 + 指环 + 亮核
                     drawCircle(
-                        color = pigmentBase.copy(alpha = 0.35f * ringA),
-                        radius = strokePx * 0.48f,
-                        center = headCenter + Offset(strokePx * 0.07f, strokePx * 0.06f),
+                        color = Champagne.copy(alpha = 0.16f * ringA),
+                        radius = strokePx * 0.85f,
+                        center = headCenter,
                     )
+                    drawCircle(
+                        color = Champagne.copy(alpha = 0.9f * ringA),
+                        radius = strokePx * 0.46f,
+                        center = headCenter,
+                        style = Stroke(strokePx * 0.12f),
+                    )
+                    drawCircle(
+                        color = ChampagneBright.copy(alpha = 0.95f * ringA),
+                        radius = strokePx * 0.26f,
+                        center = headCenter,
+                    )
+                } else {
+                    drawCircle(
+                        color = pigmentBase.copy(alpha = 0.75f * ringA),
+                        radius = strokePx * 0.52f,
+                        center = headCenter,
+                    )
+                    if (doodle) {
+                        drawCircle(
+                            color = pigmentBase.copy(alpha = 0.35f * ringA),
+                            radius = strokePx * 0.48f,
+                            center = headCenter + Offset(strokePx * 0.07f, strokePx * 0.06f),
+                        )
+                    }
                 }
-                // 弧首彗尾：沿弧向后的渐隐拖尾，制造运动质感
-                if (clamped > 0.02f) {
+                // 弧首彗尾：沿弧向后的渐隐拖尾，制造运动质感（玻璃主题用游标定点，不拖尾）
+                if (clamped > 0.02f && mode != ThemeMode.NOCTURNE) {
                     for (k in 1..8) {
                         val trailAngle = headAngle - k * 0.05
                         drawCircle(
@@ -459,9 +568,9 @@ fun RingTimer(
         }
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            // 水彩：数字交替也是颜料晕开，走 500ms 液态缓动（禁 120ms 快速淡切）
+            // 主题节奏：水彩=500ms 液态晕开；玻璃=500ms 流体（禁 duration-100/150）；涂鸦保留快速淡切
             val tickFadeMs = when (mode) {
-                ThemeMode.WATERCOLOR -> 500
+                ThemeMode.WATERCOLOR, ThemeMode.NOCTURNE -> 500
                 else -> 120
             }
             // 时钟容器宽度钉死在最宽组合上：AnimatedContent 交替时容器会在新旧

@@ -133,6 +133,7 @@ internal fun TaskEditorSheet(
         sheetState = sheetState,
         containerColor = PaperElevated,
     ) {
+        com.example.flowtime.ui.components.BlurDialogBehind(26.dp)
         Column(Modifier.fillMaxWidth().padding(horizontal = Dimens.ScreenPadding)) {
             Column(
                 modifier = Modifier

@@ -138,7 +138,7 @@ object WatercolorPalette : AppPalette {
         Color(0xFFA8724A) to Color.White,   // 焦糖
     )
     override val navContainer = Color(0xFFFCFAF7)
-    override val navItemUnselected = Color(0x99000000)
+    override val navItemUnselected = Color(0xFF8A8A8A)
     override val shadowInk = primary
     override val shadowAmbientAlpha = 0.35f
     override val shadowSpotAlpha = 0.28f

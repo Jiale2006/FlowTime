@@ -29,7 +29,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import com.example.flowtime.ui.components.BlurDialogBehind
 import com.example.flowtime.ui.components.FlowAlertDialog
+import com.example.flowtime.ui.components.ReedPaintingTimer
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -46,6 +48,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -87,6 +90,9 @@ import com.example.flowtime.ui.theme.SurfaceCard
 import com.example.flowtime.ui.theme.TaskCardPalette
 import com.example.flowtime.ui.theme.TextPrimary
 import com.example.flowtime.ui.theme.TextSecondary
+import com.example.flowtime.ui.theme.ThemeMode
+
+private const val COUNT_UP_PAINT_TOTAL_MS = 60L * 60L * 1000L
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -105,6 +111,8 @@ fun TimerScreen(
     val isIdle = timer.phase == AppViewModel.TimerPhase.IDLE
     val reducedMotion = rememberReducedMotion()
     val ambient = rememberAmbientParticlesState()
+    // 「芦苇河」显影进度在番茄休息段冻结（休息不算专注，画不生长）
+    val frozenPaintingP = remember { mutableFloatStateOf(0f) }
     // 环形计时器按屏高自适应，尽量让待机页一屏放下（小屏才需要轻微滚动）
     val screenHeightDp = LocalConfiguration.current.screenHeightDp
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
@@ -262,8 +270,37 @@ fun TimerScreen(
                     isIdle -> timer.totalMillis
                     else -> timer.remainingMillis
                 }
-                if (!isIdle && !reducedMotion) {
-                    // 环境漂浮粒子：运行中上飘，最后 5 秒加速冲刺，暂停自然消散
+                // 「芦苇河」画作：前半程显影（到 50% 时遮挡光斑散尽、整画全显），
+                // 后半程芦苇逐支随风摆动。时间线 focusFrac = 真实进度：
+                // 倒计时/番茄专注段 = elapsed/total；正计时 = elapsed/虚拟1小时（封顶，走满触发钤印）；
+                // 显影进度 paintingP：倒计时 = focusFrac×2 封顶 1；正计时 = 开四次方前紧后松曲线；
+                // 番茄休息段冻结；待机显示整画幻影（低透明度预告"专注会画出什么"）。
+                var focusFrac = when {
+                    timer.mode == AppViewModel.TimerMode.COUNT_UP ->
+                        (timer.elapsedMillis / COUNT_UP_PAINT_TOTAL_MS.toFloat()).coerceIn(0f, 1f)
+                    isIdle -> 1f
+                    else -> 1f - timer.progress
+                }
+                var paintingP = if (timer.mode == AppViewModel.TimerMode.COUNT_UP) {
+                    // 正计时显影走"前紧后松"曲线（四次方根，虚拟总长 1 小时）：
+                    // 15min≈7成、30min≈8成5、45min≈9成5、1h 收满——短会话也有"画出大半"的满足感
+                    Math.sqrt(Math.sqrt(focusFrac.toDouble())).toFloat()
+                } else {
+                    (focusFrac * 2f).coerceAtMost(1f)
+                }
+                if (timer.inBreak) paintingP = frozenPaintingP.floatValue
+                if (!isIdle && !timer.inBreak) frozenPaintingP.floatValue = paintingP
+                // 钤印只认走满（与显影解耦，显影在半程就到 1 了）
+                val paintingCompleted = focusFrac >= 1f && !isIdle
+                val modeLabel = when {
+                    timer.inBreak -> "番茄计时 · 休息中 · 第 ${timer.round} 轮已完成"
+                    timer.mode == AppViewModel.TimerMode.COUNT_UP -> "正计时"
+                    timer.mode == AppViewModel.TimerMode.POMODORO ->
+                        "番茄计时 · 第 ${timer.round} 轮专注"
+                    else -> "倒计时"
+                }
+                if (!isIdle && !reducedMotion && ActivePalette.mode != ThemeMode.WATERCOLOR) {
+                    // 环境漂浮粒子：运行中上飘，最后 5 秒加速冲刺，暂停自然消散（圆环专属）
                     AmbientParticles(
                         state = ambient,
                         active = timer.phase == AppViewModel.TimerPhase.RUNNING,
@@ -277,10 +314,31 @@ fun TimerScreen(
                         },
                     )
                 }
-                RingTimer(
-                    progress = if (isIdle) 1f else timer.progress,
-                    pigmentProgress = timer.progress,
-                    timeText = formatClock(displayMillis),
+                if (ActivePalette.mode == ThemeMode.WATERCOLOR) {
+                    // 水彩主题：「芦苇河」画作显影（替代圆环）
+                    // 风：显影走完（半程）后起风，吹的是全显的画
+                    val windActive = !isIdle && !timer.inBreak &&
+                        focusFrac >= 0.5f && timer.phase != AppViewModel.TimerPhase.PAUSED
+                    Box {
+                        ReedPaintingTimer(
+                            progress = paintingP,
+                            timeText = formatClock(displayMillis),
+                            modeLabel = modeLabel,
+                            modifier = Modifier
+                                .fillMaxHeight(0.94f)
+                                .fillMaxWidth(),
+                            completed = paintingCompleted,
+                            windActive = windActive,
+                            ghost = isIdle,
+                            dimmed = timer.phase == AppViewModel.TimerPhase.PAUSED,
+                            reducedMotion = reducedMotion,
+                        )
+                    }
+                } else {
+                    RingTimer(
+                        progress = if (isIdle) 1f else timer.progress,
+                        pigmentProgress = timer.progress,
+                        timeText = formatClock(displayMillis),
                     modifier = Modifier.fillMaxHeight(0.94f),
                     breathing = timer.phase == AppViewModel.TimerPhase.RUNNING && !reducedMotion,
                     dimmed = timer.phase == AppViewModel.TimerPhase.PAUSED,
@@ -307,6 +365,7 @@ fun TimerScreen(
                         null
                     },
                 )
+                }
                 if (!isIdle) {
                     Box(
                         modifier = Modifier
@@ -490,6 +549,7 @@ fun TimerScreen(
             onDismissRequest = { showDurationPicker = false },
             containerColor = PaperElevated,
         ) {
+            BlurDialogBehind(26.dp)
             Column(
                 Modifier
                     .fillMaxWidth()
@@ -525,6 +585,7 @@ fun TimerScreen(
             onDismissRequest = { showPomodoroSheet = false },
             containerColor = PaperElevated,
         ) {
+            BlurDialogBehind(26.dp)
             Column(
                 Modifier
                     .fillMaxWidth()
@@ -563,6 +624,7 @@ fun TimerScreen(
 
     if (showTaskPicker) {
         ModalBottomSheet(onDismissRequest = { showTaskPicker = false }) {
+            BlurDialogBehind(26.dp)
             Column(Modifier.padding(horizontal = Dimens.ScreenPadding).padding(bottom = Dimens.ListBottomGap)) {
                 Text("选择专注任务", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
                 Spacer(Modifier.height(12.dp))
@@ -659,13 +721,14 @@ fun TimerScreen(
     }
 }
 
+
 @Composable
 private fun DurationSelector(
     selectedMinutes: Int,
     onSelect: (Int) -> Unit,
     onCustom: () -> Unit,
 ) {
-    val presets = listOf(30, 45, 60, 90, 120, 150)
+    val presets = listOf(1, 30, 45, 60, 90, 120, 150)
     val hourLabels = mapOf(60 to "1h", 90 to "1.5h", 120 to "2h", 150 to "2.5h")
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -693,6 +756,7 @@ private fun DurationSelector(
         )
     }
 }
+
 
 @Composable
 private fun ModeSelector(

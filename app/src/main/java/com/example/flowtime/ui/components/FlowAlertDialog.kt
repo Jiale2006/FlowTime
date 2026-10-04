@@ -2,6 +2,9 @@ package com.example.flowtime.ui.components
 
 import android.os.Build
 import android.view.WindowManager
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,16 +19,53 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogWindowProvider
 import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.GlassFillHigh
 import com.example.flowtime.ui.theme.ThemeMode
+
+/**
+ * 给「当前这个浮层自己的窗口」开背景模糊（FLAG_BLUR_BEHIND，API 31+）。
+ * 在 Dialog / ModalBottomSheet 的内容槽里调用即可；
+ * 拿不到窗口或系统太低时静默不生效（浮层照常显示，只是没虚化）。
+ *
+ * 关键：模糊属性在**组合期**（窗口 show 之前）就设置——若放到 DisposableEffect
+ * 里，弹窗会先以清晰背景出现、半拍后才虚化（肉眼可见的延迟）。
+ * 关闭时仍在 onDispose 里清标记。
+ */
+@Composable
+fun BlurDialogBehind(radiusDp: Dp, dimAmount: Float? = null) {
+    val view = LocalView.current
+    val density = LocalDensity.current
+    val supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val window = (view.parent as? DialogWindowProvider)?.window
+    if (window != null && supported) {
+        window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+        window.attributes = window.attributes.apply {
+            blurBehindRadius = with(density) { radiusDp.roundToPx() }
+            // 关掉窗口入场动画：模糊/压暗点下即到位（卡片自己的淡入由内容层做）
+            windowAnimations = 0
+        }
+        if (dimAmount != null) window.setDimAmount(dimAmount)
+    }
+    DisposableEffect(window) {
+        onDispose {
+            if (supported && window != null) {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
+            }
+        }
+    }
+}
 
 /**
  * 主题化确认弹窗（替代 M3 AlertDialog 的容器）：
@@ -35,6 +75,9 @@ import com.example.flowtime.ui.theme.ThemeMode
  *   低版本自动退化为深钢蓝实底）+ 白 15% 描边 + 方向性光；
  * - 水彩画风：纸色实心卡 + 细描边 + 柔和晕染阴影。
  * M3 AlertDialog 只换配色不换材质，弹窗会从主题里"掉出来"，所以自绘容器。
+ *
+ * 背景虚化：所有主题在 API 31+ 上都开 FLAG_BLUR_BEHIND——弹窗弹出时
+ * 身后的界面被真实高斯模糊（半径按主题调），不再是"清晰背景 + 变暗"。
  *
  * 槽位与 AlertDialog 一致（title/text/confirmButton/dismissButton），
  * 调用点只需换函数名；标题/正文继承主题字体并自动用 onSurface 内容色。
@@ -49,39 +92,34 @@ fun FlowAlertDialog(
 ) {
     Dialog(onDismissRequest = onDismissRequest) {
         val palette = ActivePalette
-        val view = LocalView.current
-        val density = LocalDensity.current
 
-        // 夜航：给弹窗窗口开"背景模糊"——玻璃面板后面必须真正 blur，
-        // 否则只是半透明色块（backdrop-saturate 无法按窗口设置，靠降低 dim 提亮场景补回）。
-        if (palette.mode == ThemeMode.NOCTURNE) {
-            DisposableEffect(view) {
-                val window = (view.parent as? DialogWindowProvider)?.window
-                var blurApplied = false
-                if (window != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    window.addFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
-                    window.attributes = window.attributes.apply {
-                        blurBehindRadius = with(density) { 40.dp.roundToPx() }
-                    }
-                    window.setDimAmount(0.45f)
-                    blurApplied = true
-                }
-                onDispose {
-                    if (blurApplied && window != null) {
-                        window.clearFlags(WindowManager.LayoutParams.FLAG_BLUR_BEHIND)
-                    }
-                }
-            }
-        }
+        // 背景模糊（API 31+）：玻璃主题半径最大 + 压暗更多（玻璃要有东西可模糊）；
+        // 水彩/涂鸦轻一点——只是把身后的界面揉虚，突出纸卡本身。
+        val blurSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+        BlurDialogBehind(
+            radiusDp = if (palette.mode == ThemeMode.NOCTURNE) 40.dp else 22.dp,
+            dimAmount = if (palette.mode == ThemeMode.NOCTURNE) 0.45f else null,
+        )
 
-        // 夜航：玻璃白 12%（GlassFillHigh）叠在模糊背景上 = 真毛玻璃；
-        // 模糊不可用（API < 31）时 dim 已调低、场景本就深墨，玻璃仍可读。
-        val container = when (palette.mode) {
-            ThemeMode.NOCTURNE -> GlassFillHigh
+        // 玻璃：模糊可用时 = 玻璃白 12% 叠在真模糊上（毛玻璃成立）；
+        // 模糊不可用（API < 31）时退化为深钢蓝实底，保证可读。
+        val container = when {
+            palette.mode == ThemeMode.NOCTURNE && blurSupported -> GlassFillHigh
             else -> palette.dialogContainer
         }
+        // 窗口动画已关，卡片自己做一个短促浮入（背景虚化是瞬间的）
+        val enter = remember { Animatable(0f) }
+        LaunchedEffect(Unit) {
+            enter.animateTo(1f, tween(260, easing = FastOutSlowInEasing))
+        }
         ProCard(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    alpha = enter.value
+                    scaleX = 0.96f + 0.04f * enter.value
+                    scaleY = 0.96f + 0.04f * enter.value
+                },
             shape = palette.cardShape,
             color = container,
             elevation = 14.dp,

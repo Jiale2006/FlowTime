@@ -118,10 +118,45 @@ private fun doodleScheme(p: AppPalette) = lightColorScheme(
 )
 
 /**
- * 涂鸦主题字体：无衬线 + 加粗（手绘笔记的随意感）；
- * 水彩/夜航沿用衬线轻字重的旧排版。
+ * 字体按主题走：
+ * 水彩 = 标题衬线轻字重宽字距 + 正文无衬线轻字重（风格提示词 font-serif font-light tracking-wide）；
+ * 涂鸦 = 无衬线 + 加粗（手绘笔记的随意感）；夜航 = M3 默认。
  */
 private fun typographyFor(mode: ThemeMode): Typography = when (mode) {
+    ThemeMode.WATERCOLOR -> Typography(
+        headlineLarge = TextStyle(
+            fontFamily = FontFamily.Serif, fontWeight = FontWeight.Light,
+            fontSize = 28.sp, lineHeight = 36.sp, letterSpacing = 1.sp,
+        ),
+        headlineMedium = TextStyle(
+            fontFamily = FontFamily.Serif, fontWeight = FontWeight.Light,
+            fontSize = 24.sp, lineHeight = 32.sp, letterSpacing = 1.sp,
+        ),
+        headlineSmall = TextStyle(
+            fontFamily = FontFamily.Serif, fontWeight = FontWeight.Light,
+            fontSize = 20.sp, lineHeight = 28.sp, letterSpacing = 0.8.sp,
+        ),
+        titleLarge = TextStyle(
+            fontFamily = FontFamily.Serif, fontWeight = FontWeight.Light,
+            fontSize = 20.sp, lineHeight = 28.sp, letterSpacing = 0.6.sp,
+        ),
+        titleMedium = TextStyle(
+            fontFamily = FontFamily.Serif, fontWeight = FontWeight.Normal,
+            fontSize = 16.sp, lineHeight = 24.sp, letterSpacing = 0.4.sp,
+        ),
+        bodyLarge = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Light,
+            fontSize = 16.sp, lineHeight = 26.sp,
+        ),
+        bodyMedium = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Light,
+            fontSize = 14.sp, lineHeight = 22.sp,
+        ),
+        bodySmall = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Light,
+            fontSize = 12.sp, lineHeight = 18.sp,
+        ),
+    )
     ThemeMode.DOODLE -> Typography(
         headlineMedium = TextStyle(
             fontFamily = FontFamily.SansSerif,
@@ -170,8 +205,15 @@ private fun typographyFor(mode: ThemeMode): Typography = when (mode) {
     else -> Typography
 }
 
-/** 涂鸦主题把 M3 组件圆角整体收小（弹窗/弹层 rounded-sm 档），其余用 M3 默认 */
+/** 水彩把 M3 组件圆角整体放大（输入框 extraSmall=16dp ≈ rounded-2xl）；涂鸦整体收小 */
 private fun shapesFor(mode: ThemeMode): Shapes = when (mode) {
+    ThemeMode.WATERCOLOR -> Shapes(
+        extraSmall = RoundedCornerShape(16.dp),
+        small = RoundedCornerShape(16.dp),
+        medium = RoundedCornerShape(20.dp),
+        large = RoundedCornerShape(24.dp),
+        extraLarge = RoundedCornerShape(28.dp),
+    )
     ThemeMode.DOODLE -> Shapes(
         extraSmall = RoundedCornerShape(4.dp),
         small = RoundedCornerShape(4.dp),
