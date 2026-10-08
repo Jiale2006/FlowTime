@@ -94,6 +94,15 @@ fun TasksScreen(
     val gridView = !settings.taskListView
     var showEditor by remember { mutableStateOf(false) }
     var pendingDelete by remember { mutableStateOf<FocusTask?>(null) }
+    // 乐观删除：确认那一刻先把条目（连同小任务）从界面摘掉，数据库删完
+    // 由 Flow 追平；否则列表要等 Room 失效回调，比弹窗关闭晚一帧以上，观感不同步。
+    var goneIds by remember { mutableStateOf(emptySet<String>()) }
+    LaunchedEffect(tasks) {
+        if (goneIds.isNotEmpty()) {
+            goneIds = goneIds.filter { id -> tasks.any { it.id == id } }.toSet()
+        }
+    }
+    val liveTasks = tasks.filter { it.id !in goneIds }
 
     // 首页「＋新建任务」跳转过来时直接打开编辑器
     LaunchedEffect(newTaskRequest) {
@@ -103,9 +112,9 @@ fun TasksScreen(
         }
     }
 
-    val nameById = tasks.associate { it.id to it.name }
+    val nameById = liveTasks.associate { it.id to it.name }
 
-    fun childrenOf(taskId: String): List<FocusTask> = tasks.filter { it.parentId == taskId }
+    fun childrenOf(taskId: String): List<FocusTask> = liveTasks.filter { it.parentId == taskId }
 
     /** 累计时长：按 taskId 归属（含改名前的旧记录）；大类 = 自身 + 小任务 */
     fun minutesOf(task: FocusTask): Int =
@@ -114,7 +123,7 @@ fun TasksScreen(
 
     // 顶层任务在前，小任务在后；大类（也就是"挂了小任务的任务"）自然排在顶层里
     val rows: List<TaskRowModel> = buildList {
-        tasks.filter { it.parentId == null }.forEach { task ->
+        liveTasks.filter { it.parentId == null }.forEach { task ->
             add(
                 TaskRowModel(
                     task = task,
@@ -124,7 +133,7 @@ fun TasksScreen(
                 ),
             )
         }
-        tasks.filter { it.parentId != null }.forEach { task ->
+        liveTasks.filter { it.parentId != null }.forEach { task ->
             add(
                 TaskRowModel(
                     task = task,
@@ -216,7 +225,7 @@ fun TasksScreen(
 
     if (showEditor) {
         TaskEditorSheet(
-            parentOptions = tasks.filter { it.parentId == null },
+            parentOptions = liveTasks.filter { it.parentId == null },
             defaultColorIndex = tasks.size % TaskCardPalette.size,
             defaultIconIndex = tasks.size % TaskIcons.size,
             onDismiss = { showEditor = false },
@@ -249,6 +258,8 @@ fun TasksScreen(
             },
             confirmButton = {
                 TextButton(onClick = {
+                    // 级联条目一并即时摘除（父任务删除会带走小任务）
+                    goneIds = goneIds + target.id + childrenOf(target.id).map { it.id }
                     viewModel.deleteTask(target.id)
                     pendingDelete = null
                 }) {

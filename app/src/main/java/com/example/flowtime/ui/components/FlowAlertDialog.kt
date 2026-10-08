@@ -2,10 +2,8 @@ package com.example.flowtime.ui.components
 
 import android.os.Build
 import android.view.WindowManager
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,11 +17,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Dp
@@ -101,29 +96,29 @@ fun FlowAlertDialog(
             dimAmount = if (palette.mode == ThemeMode.NOCTURNE) 0.45f else null,
         )
 
-        // 玻璃：模糊可用时 = 玻璃白 12% 叠在真模糊上（毛玻璃成立）；
-        // 模糊不可用（API < 31）时退化为深钢蓝实底，保证可读。
-        val container = when {
-            palette.mode == ThemeMode.NOCTURNE && blurSupported -> GlassFillHigh
-            else -> palette.dialogContainer
-        }
-        // 窗口动画已关，卡片自己做一个短促浮入（背景虚化是瞬间的）
-        val enter = remember { Animatable(0f) }
-        LaunchedEffect(Unit) {
-            enter.animateTo(1f, tween(260, easing = FastOutSlowInEasing))
-        }
-        ProCard(
+        // 窗口四周留白：涂鸦主题的胶带（探出卡顶 ~7dp）+ 硬偏移阴影（右/下 3dp）、
+        // 水彩/夜航的晕染阴影都画在布局边界之外——弹窗窗口按内容大小开洞时，
+        // 越界部分首帧会被裁掉、下一帧才显形（观感"慢半拍"）。留白让它们从第一帧就在窗口内。
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .graphicsLayer {
-                    alpha = enter.value
-                    scaleX = 0.96f + 0.04f * enter.value
-                    scaleY = 0.96f + 0.04f * enter.value
-                },
-            shape = palette.cardShape,
-            color = container,
-            elevation = 14.dp,
+                .padding(horizontal = 10.dp, vertical = 18.dp),
         ) {
+            // 玻璃：模糊可用时 = 玻璃白 12% 叠在真模糊上（毛玻璃成立）；
+            // 模糊不可用（API < 31）时退化为深钢蓝实底，保证可读。
+            val container = when {
+                palette.mode == ThemeMode.NOCTURNE && blurSupported -> GlassFillHigh
+                else -> palette.dialogContainer
+            }
+            // 窗口动画已关，卡片也直接满 alpha 出现：
+            // 之前的 260ms 浮入会让首帧整卡透明、装饰与卡体分帧显形（观感"贴纸慢半拍"），
+            // 实测得不偿失，改回瞬时。
+            ProCard(
+                modifier = Modifier.fillMaxWidth(),
+                shape = palette.cardShape,
+                color = container,
+                elevation = 14.dp,
+            ) {
             CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
                 Column(Modifier.padding(horizontal = 22.dp, vertical = 20.dp)) {
                     if (title != null) {
@@ -148,6 +143,7 @@ fun FlowAlertDialog(
                         confirmButton()
                     }
                 }
+            }
             }
         }
     }

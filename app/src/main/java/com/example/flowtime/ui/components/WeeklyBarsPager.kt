@@ -38,7 +38,8 @@ import com.example.flowtime.ui.theme.TextPrimary
 import com.example.flowtime.ui.theme.TextSecondary
 
 /**
- * 按周分页柱状图：index 0 = 本周，右滑看更早（任务详情/统计/大类复用）。
+ * 按周分页柱状图：index 0 = 本周，右滑翻页看更早的周（任务详情/统计/大类复用）。
+ * reverseLayout 让"下一页（更早）"排在左侧，右滑手势即回拨时间。
  * 页首显示周标签 + 周合计 + 页码。
  */
 @Composable
@@ -68,7 +69,11 @@ fun WeeklyBarsPager(
             )
         }
         Spacer(Modifier.height(10.dp))
-        HorizontalPager(state = pagerState, modifier = Modifier.fillMaxWidth()) { pageIndex ->
+        HorizontalPager(
+            state = pagerState,
+            reverseLayout = true,
+            modifier = Modifier.fillMaxWidth(),
+        ) { pageIndex ->
             WeeklyBarRow(
                 days = pages[pageIndex].days,
                 barColor = barColor,
