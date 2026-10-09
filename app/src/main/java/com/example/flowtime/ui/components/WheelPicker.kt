@@ -317,32 +317,6 @@ private fun pastDayLabelOf(date: LocalDate, today: LocalDate): String = when (to
     )
 }
 
-/**
- * 补录用的日期滚轮：从今天往前 [daysBack] 天，今天在下、越往上越早。
- * 选中项 = 距今天的天数偏移（0 = 今天）。
- */
-@Composable
-fun PastDateWheel(
-    daysAgo: Int,
-    onDaysAgoChange: (Int) -> Unit,
-    today: LocalDate,
-    daysBack: Int = 60,
-    modifier: Modifier = Modifier,
-    columnWidth: Dp = 104.dp,
-    fadeColor: Color? = null,
-) {
-    val labels = remember(today, daysBack) {
-        (0 until daysBack).map { pastDayLabelOf(today.minusDays(it.toLong()), today) }
-    }
-    WheelColumn(
-        items = labels,
-        selectedIndex = daysAgo.coerceIn(0, labels.lastIndex),
-        onIndexChange = onDaysAgoChange,
-        modifier = modifier.width(columnWidth),
-        fadeColor = fadeColor,
-    )
-}
-
 /** 单个日期快选 chip（今天 / 昨天 / 前天 / 更多） */
 @Composable
 fun DayQuickChip(

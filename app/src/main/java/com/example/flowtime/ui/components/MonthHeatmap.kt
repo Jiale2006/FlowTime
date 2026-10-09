@@ -39,7 +39,7 @@ import com.example.flowtime.ui.theme.TextPlaceholder
 import com.example.flowtime.ui.theme.TextSecondary
 import java.time.LocalDate
 
-private val WeekLabels = listOf("一", "二", "三", "四", "五", "六", "日")
+internal val WeekLabels = listOf("一", "二", "三", "四", "五", "六", "日")
 
 /** 色阶图例（由浅到深，与 heatColor 一一对应）；读取器形式，主题切换时取到当前色 */
 private val HeatLegend: List<Color>
@@ -183,13 +183,19 @@ fun MonthHeatmapPager(
 
 /** 单格颜色：5 档半透明水彩色阶；范围外淡显 */
 private fun heatColor(cell: AppViewModel.HeatCell): Color {
-    val base = when {
-        cell.minutes <= 0 -> CardCream
-        cell.minutes < 30 -> AccentGreen.copy(alpha = 0.35f)
-        cell.minutes < 60 -> AccentGreen.copy(alpha = 0.55f)
-        cell.minutes < 90 -> PrimaryLight.copy(alpha = 0.6f)
-        else -> Primary.copy(alpha = 0.75f)
-    }
+    val base = heatColorOf(cell.minutes)
     // 范围外整体轻微淡显：既聚焦当前范围，又保留坚持情况的可读性
     return if (cell.inRange) base else base.copy(alpha = base.alpha * 0.7f)
+}
+
+/**
+ * 专注分钟数 → 水彩色阶（5 档）。
+ * 刻意**只依赖分钟数**，好让补录日历（[MonthCalendar]）复用同一套观感。
+ */
+fun heatColorOf(minutes: Int): Color = when {
+    minutes <= 0 -> CardCream
+    minutes < 30 -> AccentGreen.copy(alpha = 0.35f)
+    minutes < 60 -> AccentGreen.copy(alpha = 0.55f)
+    minutes < 90 -> PrimaryLight.copy(alpha = 0.6f)
+    else -> Primary.copy(alpha = 0.75f)
 }

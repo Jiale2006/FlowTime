@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -43,9 +42,7 @@ import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.components.DayQuickChip
 import com.example.flowtime.ui.components.DurationWheelBlock
 import com.example.flowtime.ui.components.HourMinuteWheel
-import com.example.flowtime.ui.components.PastDateWheel
-import com.example.flowtime.ui.components.WheelHeight
-import com.example.flowtime.ui.components.WheelSelectionBand
+import com.example.flowtime.ui.components.MonthCalendar
 import com.example.flowtime.ui.components.formatMinutesHm
 import com.example.flowtime.ui.components.pastDayLabel
 import com.example.flowtime.ui.theme.ActivePalette
@@ -58,7 +55,9 @@ import com.example.flowtime.ui.theme.TextSecondary
 import com.example.flowtime.ui.theme.WarningAmber
 import java.time.Instant
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 
 /** 页面开局用的初始值（已做过重叠避让） */
 private data class Seed(
@@ -121,6 +120,18 @@ fun BackfillScreen(
 
     val date = today.minusDays(daysAgo.toLong())
     val capMinutes = BackfillRules.endCapMinutes(date, nowMillis, zone)
+
+    // 「更多」展开的月历：往回 12 个月（与统计页热力图能回看的范围一致），早→晚排列
+    val calendarMonths = remember(today) {
+        val current = YearMonth.from(today)
+        (0 until 12).map { current.minusMonths(it.toLong()) }.reversed()
+    }
+    // 每天已有的专注时长，用来给日历格子淡染。**按结束日聚合**——与全部统计口径一致
+    val minutesByDate = remember(records, zone) {
+        records
+            .groupBy { Instant.ofEpochMilli(it.endEpochMillis).atZone(zone).toLocalDate() }
+            .mapValues { (_, list) -> list.sumOf { it.minutes } }
+    }
 
     // 切到「今天」时，把已经拨到未来的结束时刻拉回此刻（否则滚轮和落库值会对不上）
     LaunchedEffect(daysAgo) {
@@ -239,21 +250,20 @@ fun BackfillScreen(
                     )
                 }
 
-                // 「更多」就地展开日期滚轮
+                // 「更多」就地展开月历：比原来 60 天的滚轮好找，还能一眼看出哪天是空的
                 if (showDateWheel) {
                     Spacer(Modifier.height(10.dp))
-                    Box(
-                        Modifier.fillMaxWidth().height(WheelHeight),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        WheelSelectionBand()
-                        PastDateWheel(
-                            daysAgo = daysAgo,
-                            onDaysAgoChange = { daysAgo = it },
-                            today = today,
-                            modifier = Modifier.width(130.dp),
-                        )
-                    }
+                    MonthCalendar(
+                        months = calendarMonths,
+                        minutesByDate = minutesByDate,
+                        selected = date,
+                        maxSelectable = today,
+                        today = today,
+                        onSelect = { picked ->
+                            daysAgo = ChronoUnit.DAYS.between(picked, today).toInt().coerceAtLeast(0)
+                            showDateWheel = false
+                        },
+                    )
                 }
 
                 Spacer(Modifier.height(16.dp))
