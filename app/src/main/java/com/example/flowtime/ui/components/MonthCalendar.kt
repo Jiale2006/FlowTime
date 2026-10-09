@@ -25,9 +25,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.flowtime.ui.theme.CardCream
 import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.TextPlaceholder
-import com.example.flowtime.ui.theme.TextPrimary
 import com.example.flowtime.ui.theme.TextSecondary
 import java.time.LocalDate
 import java.time.YearMonth
@@ -160,11 +160,12 @@ private fun DayCell(
     modifier: Modifier = Modifier,
 ) {
     val shape = RoundedCornerShape(6.dp)
+    val fill = heatColorOf(minutes)
     Box(
         modifier = modifier
             .aspectRatio(1f)
             .clip(shape)
-            .background(if (enabled) heatColorOf(minutes) else Color.Transparent)
+            .background(if (enabled) fill else Color.Transparent)
             .then(
                 when {
                     selected -> Modifier.border(1.5.dp, Primary, shape)
@@ -179,12 +180,9 @@ private fun DayCell(
             text = date.dayOfMonth.toString(),
             fontSize = 12.sp,
             fontWeight = if (selected || isToday) FontWeight.Medium else FontWeight.Normal,
-            color = when {
-                !enabled -> TextPlaceholder.copy(alpha = 0.35f)
-                selected -> Primary
-                minutes > 0 -> TextPrimary
-                else -> TextSecondary
-            },
+            // 字色交给色块决定：三套主题的底色明暗相反，
+            // 写死主题字色（夜航的 textPrimary 是近白）会在其中一套上糊掉
+            color = if (enabled) inkOn(fill) else TextPlaceholder.copy(alpha = 0.35f),
         )
     }
 }

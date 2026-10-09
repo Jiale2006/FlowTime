@@ -27,14 +27,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.theme.AccentGreen
+import com.example.flowtime.ui.theme.BgPrimary
 import com.example.flowtime.ui.theme.CardCream
 import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.PrimaryLight
+import com.example.flowtime.ui.theme.SurfaceCard
 import com.example.flowtime.ui.theme.TextPlaceholder
 import com.example.flowtime.ui.theme.TextSecondary
 import java.time.LocalDate
@@ -105,7 +108,15 @@ fun MonthHeatmap(
                                 // 入场动画必须作用在颜色 alpha 上：Modifier.alpha() 放在 .background() 之后
                                 // 会把整块（含背景）画成不可见，实测热力图会整片空白。
                                 .background(fill.copy(alpha = (fill.alpha * reveal).coerceIn(0f, 1f))),
-                        )
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            // 格子里写日号：只有色块时，根本看不出哪一格是几号
+                            Text(
+                                text = cell.date.dayOfMonth.toString(),
+                                fontSize = 11.sp,
+                                color = inkOn(fill).copy(alpha = reveal),
+                            )
+                        }
                     }
                 }
                 // 最后一行不足 7 格时补空位，避免格子被拉宽
@@ -201,3 +212,51 @@ fun heatColorOf(minutes: Int): Color = when {
     minutes < 90 -> PrimaryLight.copy(alpha = 0.6f)
     else -> Primary.copy(alpha = 0.75f)
 }
+
+/** source-over 叠加；要求 [bg] 已不透明，结果强制不透明 */
+private fun over(fg: Color, bg: Color): Color = Color(
+    red = fg.red * fg.alpha + bg.red * (1f - fg.alpha),
+    green = fg.green * fg.alpha + bg.green * (1f - fg.alpha),
+    blue = fg.blue * fg.alpha + bg.blue * (1f - fg.alpha),
+    alpha = 1f,
+)
+
+/** 格子上的字：纯黑 / 纯白两个极端，中间色在深浅两头的底色上都会读不清 */
+private val DarkInk = Color(0xFF000000)
+
+/**
+ * 两个候选字色的**对比度相等的那个点**：
+ * 黑字 = 20·L + 1，白字 = 1.05 / (L + 0.05)，令两者相等解出 L ≈ 0.18。
+ * 阈值取在这里，无论格子深浅，选中的字色都不会掉到 4.5:1 以下。
+ */
+private const val INK_FLIP_LUMINANCE = 0.18f
+
+/** 色块叠在卡片、卡片叠在页面底之后，格子的**最终可见色**（对比度测试也用它） */
+internal fun cellSurface(
+    fill: Color,
+    cardSurface: Color = SurfaceCard,
+    pageBackground: Color = BgPrimary,
+): Color = over(fill, over(cardSurface, pageBackground))
+
+/**
+ * 色块上的字色：按**最终叠出来的实际深浅**决定，不写死主题的 textPrimary。
+ *
+ * 必须把底色传进来算，原因有两层：
+ * 1. 三套主题的卡片底色**明暗相反**——纸主题是米白、夜航是 94% 不透明的深钢蓝；
+ * 2. 色阶本身是**半透明**的（玻璃主题的 cardCream 甚至只有 3% 白）。
+ *
+ * 踩过的两个坑，都被 `HeatContrastTest` 钉住了：
+ * - 直接拿 cardCream 当底色算 → 夜航下算成"纯白底" → 选深墨字，糊在深色卡上；
+ * - 候选字色用 0x2B2B2B 这种"近黑"，在水彩最深档（蓝 75%）上只有 4.19:1，不到 WCAG 的 4.5。
+ *   换成纯黑/纯白并把阈值放到两候选相等点，才全档达标。
+ */
+internal fun inkOn(
+    fill: Color,
+    cardSurface: Color = SurfaceCard,
+    pageBackground: Color = BgPrimary,
+): Color =
+    if (cellSurface(fill, cardSurface, pageBackground).luminance() > INK_FLIP_LUMINANCE) {
+        DarkInk
+    } else {
+        Color.White
+    }
