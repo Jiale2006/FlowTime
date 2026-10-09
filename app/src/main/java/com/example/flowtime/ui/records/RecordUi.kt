@@ -78,7 +78,7 @@ fun recordRangeText(record: FocusRecord, zone: ZoneId = ZoneId.systemDefault()):
 }
 
 /**
- * 记录行：左侧圆点 + 时间区间 + 时长；手动补录的记录带「补」标记。
+ * 记录行：左侧圆点 + 时间区间 + 时长；手动补录的记录带一个「补」标签（无其它视觉差异）。
  *
  * - **长按删除**（删除后可撤销，见 [RecordUndoBar]）
  * - **点按改时长**，仅对手动补录的记录开放；真实计时点一下会说明原因，不留"点了没反应"
@@ -119,7 +119,9 @@ fun RecordRow(
             Modifier
                 .size(8.dp)
                 .clip(CircleShape)
-                .background(if (record.recordSource == RecordSource.MANUAL) Primary else AccentGreen),
+                // 圆点不再按来源变色：补录与真实计时在列表里长得一样，
+                // 唯一线索是「补」标签（用户要求"只留一个标签"）
+                .background(AccentGreen),
         )
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {

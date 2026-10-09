@@ -528,6 +528,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private const val HEAT_MONTH_LIMIT = 12
         /** 「最强一天」取前几名（全量口径的成就类数据） */
         private const val TOP_DAYS_COUNT = 3
+
+        /** 任务详情「专注记录」卡里预列的条数（完整列表去记录页看） */
+        const val RECENT_RECORDS_PREVIEW = 10
     }
 
     // ---- 任务 CRUD ----
@@ -1128,14 +1131,25 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val recent: List<FocusRecord>,
     )
 
-    /** 单任务统计（任务详情页）：优先按 taskId 匹配，旧记录退回任务名；图表分页用 buildWeekPages */
-    fun taskStats(task: FocusTask, allRecords: List<FocusRecord>): TaskStats {
-        val mine = allRecords.filter { RecordLink.belongsTo(it, task) }
+    /**
+     * 单任务统计（任务详情页）：**含它的直接子任务**（口径与统计页「分类分布」一致）；
+     * 记录优先按 taskId 匹配，旧记录退回任务名；图表分页用 buildWeekPages。
+     *
+     * [recent] 只取最近 [RECENT_RECORDS_PREVIEW] 条 —— 卡片里那是"最近记录"的预览，
+     * 完整列表走右上角「查看更多记录」。
+     */
+    fun taskStats(
+        task: FocusTask,
+        allRecords: List<FocusRecord>,
+        allTasks: List<FocusTask>,
+    ): TaskStats {
+        val belongs = RecordLink.treePredicate(task, allTasks)
+        val mine = allRecords.filter(belongs)
         return TaskStats(
             totalMinutes = mine.sumOf { it.minutes },
             sessionCount = mine.size,
             lastFocusMillis = mine.maxOfOrNull { it.endEpochMillis },
-            recent = mine.sortedByDescending { it.endEpochMillis }.take(50),
+            recent = mine.sortedByDescending { it.endEpochMillis }.take(RECENT_RECORDS_PREVIEW),
         )
     }
 

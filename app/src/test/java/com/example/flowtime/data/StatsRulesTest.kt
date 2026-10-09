@@ -186,4 +186,54 @@ class StatsRulesTest {
     fun `全部档没有上一区间`() {
         assertNull(StatsRules.previousWindow(StatsRange.ALL, LocalDate.of(2026, 10, 9)))
     }
+
+    // ---- 小时区间筛选（记录页的时段筛选）----
+
+    private fun endAt(hour: Int, minute: Int = 0) = record(
+        startMs = ms(2026, 10, 9, hour, minute) - 30 * 60_000L,
+        endMs = ms(2026, 10, 9, hour, minute),
+    )
+
+    @Test
+    fun `同天区间按结束小时命中`() {
+        val window = StatsRules.HourWindow(18, 22)
+        assertTrue(StatsRules.inHourWindow(endAt(18), window, zone))
+        assertTrue(StatsRules.inHourWindow(endAt(22, 59), window, zone))
+        assertEquals(false, StatsRules.inHourWindow(endAt(17, 59), window, zone))
+        assertEquals(false, StatsRules.inHourWindow(endAt(23), window, zone))
+    }
+
+    @Test
+    fun `跨午夜区间命中起止两端`() {
+        // 23 → 4：命中 23、0、1、2、3、4
+        val window = StatsRules.HourWindow(23, 4)
+        listOf(23, 0, 1, 2, 3, 4).forEach { hour ->
+            assertTrue("$hour 点应命中", StatsRules.inHourWindow(endAt(hour), window, zone))
+        }
+        listOf(5, 12, 22).forEach { hour ->
+            assertEquals("$hour 点不该命中", false, StatsRules.inHourWindow(endAt(hour), window, zone))
+        }
+    }
+
+    @Test
+    fun `起止同一小时只命中那一个小时`() {
+        val window = StatsRules.HourWindow(9, 9)
+        assertTrue(StatsRules.inHourWindow(endAt(9), window, zone))
+        assertEquals(false, StatsRules.inHourWindow(endAt(10), window, zone))
+    }
+
+    @Test
+    fun `区间为 null 表示不限时段`() {
+        assertTrue(StatsRules.inHourWindow(endAt(3), null, zone))
+    }
+
+    @Test
+    fun `快捷档之间不重叠且合起来覆盖全天`() {
+        val windows = StatsRules.HourPreset.entries.mapNotNull { it.window }
+        // 24 个小时每个恰好被命中一次
+        (0..23).forEach { hour ->
+            val hits = windows.count { StatsRules.inHourWindow(endAt(hour), it, zone) }
+            assertEquals("$hour 点应恰好被一个档位命中", 1, hits)
+        }
+    }
 }

@@ -27,6 +27,22 @@ object RecordLink {
     fun belongsTo(record: FocusRecord, task: FocusTask): Boolean =
         if (record.taskId != null) record.taskId == task.id else record.taskName == task.name
 
+    /**
+     * 「该任务 + 它的**直接子任务**」的归属判定，返回谓词（一次构建、多次使用，
+     * 列表过滤时别每条记录重算一遍子任务集合）。
+     *
+     * 为什么要含子任务：统计页的「分类分布」是按记录的所属任务往上归到父任务的
+     * （见 [TaskIndex.categoryIdOf]），本来就含子任务；任务详情页若只算自己，
+     * 同一个「数学」在两个页面会给出不同的时长。
+     *
+     * **不递归**：任务层级最多两层——新建面板只把顶层任务作为可选分类
+     * （`TasksScreen` 里 `parentOptions = liveTasks.filter { it.parentId == null }`）。
+     */
+    fun treePredicate(task: FocusTask, allTasks: List<FocusTask>): (FocusRecord) -> Boolean {
+        val children = allTasks.filter { it.parentId == task.id }
+        return { record -> belongsTo(record, task) || children.any { belongsTo(record, it) } }
+    }
+
     /** 按分组键汇总分钟数 */
     fun minutesByKey(records: List<FocusRecord>): Map<String, Int> =
         records.groupBy { keyOf(it) }.mapValues { (_, list) -> list.sumOf { it.minutes } }

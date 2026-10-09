@@ -43,10 +43,12 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.completion.CompletionScreen
 import com.example.flowtime.ui.components.ThemeBackdrop
@@ -112,6 +114,7 @@ private object Routes {
     const val SETTINGS = "settings"
     const val COMPLETION = "completion"
     const val TASK_DETAIL = "taskDetail"
+    /** 记录页：可带 taskId（从任务详情进来时默认只筛该任务） */
     const val ALL_RECORDS = "allRecords"
 }
 
@@ -154,7 +157,7 @@ fun FlowTimeApp(viewModel: AppViewModel = viewModel()) {
         bottomBar = {
             if (currentRoute != Routes.COMPLETION &&
                 currentRoute?.startsWith(Routes.TASK_DETAIL) != true &&
-                currentRoute != Routes.ALL_RECORDS
+                currentRoute?.startsWith(Routes.ALL_RECORDS) != true
             ) {
                 Column {
                     // 玻璃导航条顶边的受光细线（水彩主题下是蓝灰分隔线）
@@ -266,14 +269,26 @@ fun FlowTimeApp(viewModel: AppViewModel = viewModel()) {
                             launchSingleTop = true
                         }
                     },
-                    onOpenAllRecords = { navController.navigate(Routes.ALL_RECORDS) },
+                    onOpenAllRecords = { taskId ->
+                        navController.navigate("${Routes.ALL_RECORDS}?taskId=$taskId")
+                    },
                 )
                 }
             }
-            composable(Routes.ALL_RECORDS) {
+            composable(
+                route = "${Routes.ALL_RECORDS}?taskId={taskId}",
+                arguments = listOf(
+                    navArgument("taskId") {
+                        type = NavType.StringType
+                        nullable = true
+                        defaultValue = null
+                    },
+                ),
+            ) { entry ->
                 FullPage {
                 AllRecordsScreen(
                     viewModel = viewModel,
+                    initialTaskId = entry.arguments?.getString("taskId"),
                     onBack = { navController.popBackStack() },
                 )
                 }

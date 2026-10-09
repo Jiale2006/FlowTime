@@ -29,6 +29,42 @@ object StatsRules {
     const val MIN_DAYS_FOR_AVERAGE = 2
 
     /**
+     * 一天内的小时区间（闭区间，含首含尾）。
+     * [startHour] > [endHour] 表示**跨午夜**，如 23 → 4 覆盖 23、0、1、2、3、4 点。
+     */
+    data class HourWindow(val startHour: Int, val endHour: Int)
+
+    /**
+     * 时段快捷档。[window] 为 null = 不限。
+     * 五档两两不重叠，合起来正好覆盖 0–23（改档位范围时请保持这条性质）。
+     */
+    enum class HourPreset(val label: String, val window: HourWindow?) {
+        ALL("全部", null),
+        MORNING("上午", HourWindow(5, 11)),
+        AFTERNOON("下午", HourWindow(12, 17)),
+        EVENING("晚上", HourWindow(18, 22)),
+        LATE_NIGHT("深夜", HourWindow(23, 4)),
+    }
+
+    /**
+     * 记录是否落在小时区间内 —— 按**结束时刻**所在小时判断。
+     *
+     * 口径与记录归属日一致（统计、热力图、按天分组全都按 `endEpochMillis` 取），
+     * 所以一条 22:40 → 次日 01:20 的记录属于「深夜」，而不是"22 点那段"。
+     * [window] 为 null 表示不限时段，直接放行。
+     */
+    fun inHourWindow(record: FocusRecord, window: HourWindow?, zone: ZoneId): Boolean {
+        if (window == null) return true
+        val hour = Instant.ofEpochMilli(record.endEpochMillis).atZone(zone).hour
+        return if (window.startHour <= window.endHour) {
+            hour in window.startHour..window.endHour
+        } else {
+            // 跨午夜：命中 起 → 23 与 0 → 止
+            hour >= window.startHour || hour <= window.endHour
+        }
+    }
+
+    /**
      * 把一条记录**按分钟摊到它跨越的每一个小时**（时段分布的算法）。
      *
      * 例：20:30 → 22:00 的 90 分钟 → {20:30, 21:60}。

@@ -84,21 +84,22 @@ fun TaskDetailScreen(
     onBack: () -> Unit,
     onStartFocus: () -> Unit,
     onOpenTask: (String) -> Unit = {},
-    onOpenAllRecords: () -> Unit = {},
+    onOpenAllRecords: (String) -> Unit = {},
 ) {
     val tasks by viewModel.tasks.collectAsState()
     val records by viewModel.records.collectAsState()
     val task = tasks.firstOrNull { it.id == taskId }
     val parentTask = task?.parentId?.let { parentId -> tasks.firstOrNull { it.id == parentId } }
     val children = tasks.filter { it.parentId == taskId }
-    val stats = remember(records, task?.id) {
-        task?.let { viewModel.taskStats(it, records) }
+    // 统计含**直接子任务**：与统计页「分类分布」口径一致（同一个「数学」两页数字终于对得上）
+    val belongsToTask = remember(task?.id, tasks) {
+        task?.let { RecordLink.treePredicate(it, tasks) } ?: { _: FocusRecord -> false }
     }
-    val weekPages = remember(records, task?.id) {
-        val owner = task
-        viewModel.buildWeekPages(
-            if (owner == null) emptyList() else records.filter { RecordLink.belongsTo(it, owner) },
-        )
+    val stats = remember(records, task?.id, tasks) {
+        task?.let { viewModel.taskStats(it, records, tasks) }
+    }
+    val weekPages = remember(records, task?.id, tasks) {
+        viewModel.buildWeekPages(records.filter(belongsToTask))
     }
     val childMinutes = remember(records, children) {
         children.associate { child -> child.name to RecordLink.minutesOf(child, records) }
@@ -315,8 +316,8 @@ fun TaskDetailScreen(
                                 color = TextPrimary,
                                 modifier = Modifier.weight(1f),
                             )
-                            TextButton(onClick = onOpenAllRecords) {
-                                Text("全部记录 ›", fontSize = 12.sp, color = Primary)
+                            TextButton(onClick = { task?.let { onOpenAllRecords(it.id) } }) {
+                                Text("查看更多记录 ›", fontSize = 12.sp, color = Primary)
                             }
                         }
                         Spacer(Modifier.height(4.dp))
@@ -328,12 +329,18 @@ fun TaskDetailScreen(
                                 color = TextPlaceholder,
                             )
                         } else {
-                            Text("长按删除 · 点按改时长（仅补录）", fontSize = 11.sp, color = TextPlaceholder)
+                            Text(
+                                // 写清"只有 10 条"，免得以为这个任务一共就记了这么点
+                                "最近 ${AppViewModel.RECENT_RECORDS_PREVIEW} 条 · 长按删除 · 点按改时长（仅补录）",
+                                fontSize = 11.sp,
+                                color = TextPlaceholder,
+                            )
                             Spacer(Modifier.height(4.dp))
                             recent.forEachIndexed { index, record ->
                                 RecordRow(
                                     record = record,
-                                    showTaskName = false,
+                                    // 有子任务时记录会混在一起，必须显示任务名才分得清是哪条
+                                    showTaskName = children.isNotEmpty(),
                                     onEditDuration = { editingRecord = record },
                                     onDelete = {
                                         deletedRecord = record
