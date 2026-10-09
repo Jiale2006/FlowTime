@@ -52,6 +52,7 @@ import com.example.flowtime.ui.components.ProCard
 import com.example.flowtime.ui.components.WeeklyBarsPager
 import com.example.flowtime.ui.components.formatMinutesHm
 import com.example.flowtime.ui.components.pressScale
+import com.example.flowtime.ui.records.BackfillDialog
 import com.example.flowtime.ui.records.DurationEditDialog
 import com.example.flowtime.ui.records.RecordDivider
 import com.example.flowtime.ui.records.RecordRow
@@ -84,7 +85,6 @@ fun TaskDetailScreen(
     onStartFocus: () -> Unit,
     onOpenTask: (String) -> Unit = {},
     onOpenAllRecords: () -> Unit = {},
-    onOpenBackfill: () -> Unit = {},
 ) {
     val tasks by viewModel.tasks.collectAsState()
     val records by viewModel.records.collectAsState()
@@ -103,6 +103,7 @@ fun TaskDetailScreen(
     val childMinutes = remember(records, children) {
         children.associate { child -> child.name to RecordLink.minutesOf(child, records) }
     }
+    var showBackfill by remember { mutableStateOf(false) }
     var showEditor by remember { mutableStateOf(false) }
     // 正在改时长的记录（仅手动补录） / 刚被删掉的记录
     var editingRecord by remember { mutableStateOf<FocusRecord?>(null) }
@@ -352,7 +353,7 @@ fun TaskDetailScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 OutlinedButton(
-                    onClick = { onOpenBackfill() },
+                    onClick = { showBackfill = true },
                     enabled = task != null,
                     modifier = Modifier.weight(1f).height(Dimens.ButtonHeightHero).pressScale(),
                     shape = RoundedCornerShape(16.dp),
@@ -396,6 +397,19 @@ fun TaskDetailScreen(
                 viewModel.clearLastAddedRecord()
             },
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 84.dp),
+        )
+    }
+
+    if (showBackfill) {
+        BackfillDialog(
+            tasks = tasks,
+            initialTaskId = task?.id,
+            records = records,
+            onDismiss = { showBackfill = false },
+            onConfirm = { picked, startMillis, endMillis ->
+                viewModel.addManualRecord(picked, startMillis, endMillis)
+                showBackfill = false
+            },
         )
     }
 

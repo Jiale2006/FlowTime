@@ -43,17 +43,14 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
-import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import androidx.navigation.navArgument
 import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.completion.CompletionScreen
 import com.example.flowtime.ui.components.ThemeBackdrop
 import com.example.flowtime.ui.records.AllRecordsScreen
-import com.example.flowtime.ui.records.BackfillScreen
 import com.example.flowtime.ui.settings.SettingsScreen
 import com.example.flowtime.ui.stats.StatsScreen
 import com.example.flowtime.ui.tasks.TaskDetailScreen
@@ -116,8 +113,6 @@ private object Routes {
     const val COMPLETION = "completion"
     const val TASK_DETAIL = "taskDetail"
     const val ALL_RECORDS = "allRecords"
-    /** 补录：独立页面（不是弹层）。taskId 可选，缺省 = 记到未分类 */
-    const val BACKFILL = "backfill"
 }
 
 private data class TopLevelRoute(val route: String, val label: String, val icon: ImageVector)
@@ -159,8 +154,7 @@ fun FlowTimeApp(viewModel: AppViewModel = viewModel()) {
         bottomBar = {
             if (currentRoute != Routes.COMPLETION &&
                 currentRoute?.startsWith(Routes.TASK_DETAIL) != true &&
-                currentRoute != Routes.ALL_RECORDS &&
-                currentRoute?.startsWith(Routes.BACKFILL) != true
+                currentRoute != Routes.ALL_RECORDS
             ) {
                 Column {
                     // 玻璃导航条顶边的受光细线（水彩主题下是蓝灰分隔线）
@@ -238,12 +232,6 @@ fun FlowTimeApp(viewModel: AppViewModel = viewModel()) {
                         }
                     },
                     onCompleted = { navController.navigate(Routes.COMPLETION) },
-                    // 补录是独立页面：taskId 缺省表示记到未分类
-                    onOpenBackfill = { taskId ->
-                        navController.navigate(
-                            if (taskId == null) Routes.BACKFILL else "${Routes.BACKFILL}?taskId=$taskId",
-                        )
-                    },
                 )
                 }
             }
@@ -279,31 +267,7 @@ fun FlowTimeApp(viewModel: AppViewModel = viewModel()) {
                         }
                     },
                     onOpenAllRecords = { navController.navigate(Routes.ALL_RECORDS) },
-                    onOpenBackfill = {
-                        val id = backStackEntry.arguments?.getString("taskId").orEmpty()
-                        navController.navigate(
-                            if (id.isBlank()) Routes.BACKFILL else "${Routes.BACKFILL}?taskId=$id",
-                        )
-                    },
                 )
-                }
-            }
-            composable(
-                route = "${Routes.BACKFILL}?taskId={taskId}",
-                arguments = listOf(
-                    navArgument("taskId") {
-                        type = NavType.StringType
-                        nullable = true
-                        defaultValue = null
-                    },
-                ),
-            ) { entry ->
-                FullPage {
-                    BackfillScreen(
-                        viewModel = viewModel,
-                        initialTaskId = entry.arguments?.getString("taskId"),
-                        onBack = { navController.popBackStack() },
-                    )
                 }
             }
             composable(Routes.ALL_RECORDS) {

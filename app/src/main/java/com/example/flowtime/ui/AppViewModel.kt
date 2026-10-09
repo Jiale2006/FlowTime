@@ -555,8 +555,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * （跨天溢出放行，不在这里再做钳制）；[task] 为 null 表示自由专注（未分类）。
      * 来源固定写 [RecordSource.MANUAL]——这是"只有它允许改时长"的依据。
      *
-     * 入库成功后写 [lastAddedRecord]：补录页提交后会立刻返回上一页，
-     * 撤销条是在**上一页**弹的，所以这个状态得跨页面活着（放 ViewModel，不放页面）。
+     * 入库成功后写 [lastAddedRecord]：界面据此弹 6 秒撤销条。
+     * 放在 ViewModel 而不是页面里，是因为补录弹窗关掉后由**宿主的页面**接着弹条，
+     * 状态不该跟着弹窗一起消失。
      */
     fun addManualRecord(task: FocusTask?, startEpochMillis: Long, endEpochMillis: Long) {
         if (endEpochMillis <= startEpochMillis) return
