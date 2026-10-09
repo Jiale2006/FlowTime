@@ -101,6 +101,12 @@ fun AllRecordsScreen(
     }
     val hourWindow = remember(hourPreset, customWindow) { customWindow ?: hourPreset.window }
 
+    // 来源任务（从任务详情进来的那一个）。「看全部」之后必须还能一键切回来，
+    // 这条路径要可逆，所以任务名记在状态里，不靠用户再去搜索框里敲。
+    val sourceTaskName = remember(initialTaskId, tasks) {
+        tasks.firstOrNull { it.id == initialTaskId }?.name
+    }
+
     val hitsTask: (FocusRecord) -> Boolean = { record ->
         val matched = matchedTaskIds
         if (matched == null) {
@@ -165,16 +171,16 @@ fun AllRecordsScreen(
                 }
             }
 
-            // 当前筛选状态：收进按钮就容易"看不见自己筛了什么"，所以这里补一行摘要。
-            // 按钮写"看全部"（说他能得到什么），不写"清空"（没说清清的是什么）。
-            if (filterActive) {
+            // 摘要行：说清"正在看什么"；按钮在「该任务 ↔ 全部」之间来回切换。
+            // 按钮写用户能得到什么（"看全部"/"看「数学」"），不写系统动作（"清空"）。
+            if (filterActive || sourceTaskName != null) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         buildString {
                             append("正在看：")
-                            if (query.isNotBlank()) append("任务「$query」")
+                            if (query.isNotBlank()) append("任务「$query」") else append("全部任务")
                             hourWindow?.let {
-                                if (query.isNotBlank()) append(" · ")
+                                append(" · ")
                                 append(hourWindowText(it))
                             }
                             append(" · 共 ${filtered.size} 条")
@@ -183,14 +189,18 @@ fun AllRecordsScreen(
                         color = TextSecondary,
                         modifier = Modifier.weight(1f),
                     )
-                    TextButton(
-                        onClick = {
-                            taskQuery = ""
-                            hourPreset = StatsRules.HourPreset.ALL
-                            customWindow = null
-                        },
-                    ) {
-                        Text("看全部", fontSize = 12.sp, color = Primary)
+                    if (sourceTaskName != null) {
+                        TextButton(
+                            onClick = {
+                                taskQuery = if (query.isNotBlank()) "" else sourceTaskName
+                            },
+                        ) {
+                            Text(
+                                if (query.isNotBlank()) "看全部" else "看「$sourceTaskName」",
+                                fontSize = 12.sp,
+                                color = Primary,
+                            )
+                        }
                     }
                 }
             } else {
