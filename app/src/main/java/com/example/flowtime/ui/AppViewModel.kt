@@ -22,6 +22,8 @@ import com.example.flowtime.data.FocusRecord
 import com.example.flowtime.data.FocusTask
 import com.example.flowtime.data.RecordLink
 import com.example.flowtime.data.RecordSource
+import com.example.flowtime.data.StatsRange
+import com.example.flowtime.data.StatsRules
 import com.example.flowtime.ui.theme.ThemeMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -521,6 +523,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private const val COUNT_UP_RING_PERIOD_MILLIS = 30 * 60_000L
         /** 正计时自动结算兜底：超过 12 小时自动保存并回待机 */
         private const val COUNT_UP_AUTO_FINISH_MILLIS = 12 * 60 * 60_000L
+        /** 月份热力图最多回看几个月（再早的记录也能翻到，但页数收敛） */
+        private const val HEAT_MONTH_LIMIT = 12
+        /** 「最强一天」取前几名（全量口径的成就类数据） */
+        private const val TOP_DAYS_COUNT = 3
     }
 
     // ---- 任务 CRUD ----
@@ -822,33 +828,49 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---- 范围统计（本周 / 本月 / 全部）----
-    /** 统计范围：本周（周一起）/ 本月（1 号起）/ 全部 */
-    enum class StatsRange(val label: String) {
-        WEEK("本周"),
-        MONTH("本月"),
-        ALL("全部"),
-    }
+    // StatsRange 已移到 data 层（StatsRules.kt）——它是统计口径的一部分，不属于 UI
 
     /** 热力图一格：当天分钟数 + 是否落在所选范围内（范围外淡显，未来空白） */
     data class HeatCell(val date: LocalDate, val minutes: Int, val inRange: Boolean)
 
-    /** 所选范围下一次性聚合结果（概览 / 时段分布 / 热力图 / 任务与分类分布） */
+    /** 一个月的热力图一页（可左右滑动看更早的月份） */
+    data class HeatMonth(
+        val year: Int,
+        val month: Int,
+        val cells: List<HeatCell>,
+        val activeDays: Int,
+        val totalMinutes: Int,
+    ) {
+        val label: String get() = "%d 年 %d 月".format(year, month)
+        val firstDay: LocalDate get() = LocalDate.of(year, month, 1)
+    }
+
+    /** 所选范围下一次性聚合结果（概览 / 时段分布 / 热力图 / 分布 / 对比） */
     data class RangeStats(
         val range: StatsRange = StatsRange.WEEK,
         val title: String = "本周概览",
         val totalMinutes: Int = 0,
-        val dailyAverageMinutes: Int = 0,
+        /** 日均；范围内已过天数不足时为 null，界面显示「—」 */
+        val dailyAverageMinutes: Int? = null,
         val sessionCount: Int = 0,
         val longestSessionMinutes: Int = 0,
         val activeDays: Int = 0,
         val hourMinutes: List<Int> = List(24) { 0 },
         /** 按天柱状数据：本周 = 周一~周日，本月 = 1 号~月末，全部范围为空（走按周分页） */
         val dailyDays: List<DayMinutes> = emptyList(),
-        val heatmap: List<HeatCell> = emptyList(),
-        val heatmapActiveDays: Int = 0,
-        val heatmapMinutes: Int = 0,
+        /** 可左右滑动的月份热力图，由早到晚（最后一页 = 当月） */
+        val heatMonths: List<HeatMonth> = emptyList(),
         val taskTotals: List<TaskTotal> = emptyList(),
         val categoryTotals: List<CategoryTotal> = emptyList(),
+        /** 上一个同长度区间的累计分钟（本周→上周 / 本月→上月）；「全部」档为 null */
+        val previousMinutes: Int? = null,
+        val previousLabel: String? = null,
+        /** 与上一区间相比的涨跌百分比；上一区间为 0 或没有上一区间时为 null */
+        val changePercent: Int? = null,
+        /** 单次时长分布（跟范围） */
+        val durationBuckets: List<StatsRules.DurationBucket> = emptyList(),
+        /** 历史最强一天 Top3（**全量**，口径原则里的"成就/里程碑类"） */
+        val topDays: List<StatsRules.TopDay> = emptyList(),
     )
 
     /** 切换统计范围并写回设置（退出应用后保持） */
@@ -891,31 +913,28 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             .mapValues { (_, list) -> list.sumOf { it.minutes } }
         val scopeMinutes = inScope.sumOf { it.minutes }
 
-        // 日均分母：范围内「起点 → 今天」的天数；全部范围取「首条记录 → 今天」，至少 1 天（防除零）
+        // 日均：分母 = 范围内已过的自然日；不足 2 天时给 null（否则周一算出来就是"当天总量"）
         val averageStart = rangeStart ?: recs.minOfOrNull { dayOf(it.endEpochMillis) } ?: today
-        val elapsedDays = (ChronoUnit.DAYS.between(averageStart, today) + 1).coerceAtLeast(1)
+        val elapsedDays = (ChronoUnit.DAYS.between(averageStart, today) + 1).coerceAtLeast(1).toInt()
+        val dailyAverage = StatsRules.dailyAverage(scopeMinutes, elapsedDays)
 
-        // 24 小时时段分布（按记录结束时刻所在小时累加）
-        val hourMinutes = IntArray(24)
-        inScope.forEach { record ->
-            val hour = Instant.ofEpochMilli(record.endEpochMillis).atZone(zone).hour
-            hourMinutes[hour] = hourMinutes[hour] + record.minutes
-        }
+        // 时段分布：按分钟摊到跨越的每个小时。
+        // 旧实现把整段分钟挂在**结束小时**上，一条 8 小时记录全堆在一根柱子里，跨天时更离谱。
+        val hourMinutes = StatsRules.hourMinutesOf(inScope, zone)
 
-        // 近 30 天热力图：固定「周一起 5 周」窗口，范围外的日子淡显（用全量记录，保持坚持情况可读）
+        // 全量按天（热力图与「最强一天」共用；这两者按口径原则都属于成就/里程碑类 → 全量）
         val allByDay = recs
             .groupBy { dayOf(it.endEpochMillis) }
             .mapValues { (_, list) -> list.sumOf { it.minutes } }
-        val heatmapStart = today.with(DayOfWeek.SUNDAY).minusDays(34)
-        val heatmap = (0 until 35).map { offset ->
-            val day = heatmapStart.plusDays(offset.toLong())
-            HeatCell(
-                date = day,
-                minutes = allByDay[day] ?: 0,
-                inRange = !day.isAfter(today) && (rangeStart == null || !day.isBefore(rangeStart)),
-            )
+
+        // 月份热力图页：从最早一条记录所在月一直到当月，最多回看 12 个月
+        val heatMonths = buildHeatMonths(allByDay, today, rangeStart)
+
+        // 上一个同长度区间（本周→上周 / 本月→上月）；「全部」档没有可比区间
+        val previousWindow = StatsRules.previousWindow(range, today)
+        val previousMinutes = previousWindow?.let { window ->
+            recs.filter { dayOf(it.endEpochMillis) in window }.sumOf { it.minutes }
         }
-        val pastHeatCells = heatmap.filter { !it.date.isAfter(today) }
 
         // 记录 → 归属：优先 taskId，旧记录按任务名找回
         val index = RecordLink.TaskIndex.of(taskList)
@@ -963,18 +982,79 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 StatsRange.ALL -> "全部概览"
             },
             totalMinutes = scopeMinutes,
-            dailyAverageMinutes = (scopeMinutes.toFloat() / elapsedDays).toInt(),
+            dailyAverageMinutes = dailyAverage,
             sessionCount = inScope.size,
             longestSessionMinutes = inScope.maxOfOrNull { it.minutes } ?: 0,
             activeDays = scopeByDay.size,
-            hourMinutes = hourMinutes.toList(),
+            hourMinutes = hourMinutes,
             dailyDays = dailyDays,
-            heatmap = heatmap,
-            heatmapActiveDays = pastHeatCells.count { it.minutes > 0 },
-            heatmapMinutes = pastHeatCells.sumOf { it.minutes },
+            heatMonths = heatMonths,
             taskTotals = taskTotals,
             categoryTotals = categoryTotals,
+            previousMinutes = previousMinutes,
+            previousLabel = when (range) {
+                StatsRange.WEEK -> "上周"
+                StatsRange.MONTH -> "上月"
+                StatsRange.ALL -> null
+            },
+            changePercent = previousMinutes?.let { StatsRules.changePercent(scopeMinutes, it) },
+            durationBuckets = StatsRules.durationBuckets(inScope),
+            topDays = StatsRules.topDays(allByDay, TOP_DAYS_COUNT),
         )
+    }
+
+    /**
+     * 月份热力图页：由早到晚排（最后一页 = 当月），最多回看 [HEAT_MONTH_LIMIT] 个月。
+     * 日期格子用全量记录（保持"坚持情况"可读），范围外的日子靠 [HeatCell.inRange] 淡显。
+     */
+    private fun buildHeatMonths(
+        allByDay: Map<LocalDate, Int>,
+        today: LocalDate,
+        rangeStart: LocalDate?,
+    ): List<AppViewModel.HeatMonth> {
+        val currentMonth = today.withDayOfMonth(1)
+        val earliestMonth = allByDay.keys.minOrNull()?.withDayOfMonth(1) ?: currentMonth
+        val pages = mutableListOf<HeatMonth>()
+        var cursor = currentMonth
+        while (!cursor.isBefore(earliestMonth) && pages.size < HEAT_MONTH_LIMIT) {
+            val cells = (1..cursor.lengthOfMonth()).map { dayOfMonth ->
+                val day = cursor.withDayOfMonth(dayOfMonth)
+                HeatCell(
+                    date = day,
+                    minutes = allByDay[day] ?: 0,
+                    inRange = !day.isAfter(today) && (rangeStart == null || !day.isBefore(rangeStart)),
+                )
+            }
+            val inRangeCells = cells.filter { it.inRange }
+            pages.add(
+                HeatMonth(
+                    year = cursor.year,
+                    month = cursor.monthValue,
+                    cells = cells,
+                    activeDays = inRangeCells.count { it.minutes > 0 },
+                    totalMinutes = inRangeCells.sumOf { it.minutes },
+                ),
+            )
+            cursor = cursor.minusMonths(1)
+        }
+        return pages.asReversed()
+    }
+
+    /**
+     * 导出用：按所选范围过滤记录。
+     * 口径与统计页一致（按 endEpochMillis 取日），避免"统计看本周、导出却是全部"。
+     */
+    fun recordsInRange(range: StatsRange): List<FocusRecord> {
+        val zone = ZoneId.systemDefault()
+        val today = LocalDate.now(zone)
+        val start = when (range) {
+            StatsRange.WEEK -> today.with(DayOfWeek.MONDAY)
+            StatsRange.MONTH -> today.withDayOfMonth(1)
+            StatsRange.ALL -> return records.value
+        }
+        return records.value.filter {
+            !Instant.ofEpochMilli(it.endEpochMillis).atZone(zone).toLocalDate().isBefore(start)
+        }
     }
 
     /** 按天柱状的横轴标签：M/d */

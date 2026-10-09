@@ -54,13 +54,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.flowtime.data.StatsRange
+import com.example.flowtime.data.StatsRules
 import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.CsvExporter
 import com.example.flowtime.ui.components.DailyBarsStrip
 import com.example.flowtime.ui.components.DonutChart
 import com.example.flowtime.ui.components.DonutSlice
 import com.example.flowtime.ui.components.HourBarsChart
-import com.example.flowtime.ui.components.MonthHeatmap
+import com.example.flowtime.ui.components.MonthHeatmapPager
 import com.example.flowtime.ui.components.ProCard
 import com.example.flowtime.ui.components.WeeklyBarsPager
 import com.example.flowtime.ui.components.formatMinutesHm
@@ -99,6 +101,12 @@ fun StatsScreen(viewModel: AppViewModel) {
     LaunchedEffect(Unit) { entrancePlayed = true }
     var showExportDialog by remember { mutableStateOf(false) }
     var exportMode by remember { mutableStateOf(CsvExporter.Mode.DETAIL) }
+
+    val weekPages = remember(records) { viewModel.buildWeekPages(records) }
+    val range = rangeStats.range
+    /** 导出**跟范围**：选了「本周」就只导本周，避免"统计看本周、导出却是全部" */
+    val exportRecords = remember(records, range) { viewModel.recordsInRange(range) }
+
     // 「保存到文件」：系统文件选择器挑位置后写入，不依赖任何接收应用
     val saveCsv = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/csv"),
@@ -107,7 +115,7 @@ fun StatsScreen(viewModel: AppViewModel) {
             val saved = CsvExporter.writeTo(
                 context,
                 uri,
-                CsvExporter.toCsv(exportMode, records, tasks, categories),
+                CsvExporter.toCsv(exportMode, exportRecords, tasks, categories),
             )
             Toast.makeText(
                 context,
@@ -116,9 +124,6 @@ fun StatsScreen(viewModel: AppViewModel) {
             ).show()
         }
     }
-
-    val weekPages = remember(records) { viewModel.buildWeekPages(records) }
-    val range = rangeStats.range
 
     Box(
         modifier = Modifier.fillMaxSize(),
@@ -140,11 +145,7 @@ fun StatsScreen(viewModel: AppViewModel) {
                     modifier = Modifier.weight(1f),
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf(
-                        AppViewModel.StatsRange.WEEK,
-                        AppViewModel.StatsRange.MONTH,
-                        AppViewModel.StatsRange.ALL,
-                    ).forEach { item ->
+                    StatsRange.entries.forEach { item ->
                         RangeChip(
                             label = item.label,
                             selected = range == item,
@@ -155,13 +156,25 @@ fun StatsScreen(viewModel: AppViewModel) {
             }
             Spacer(Modifier.height(20.dp))
 
-            // 1. 三卡总览 + 今日目标进度（全量语义，与范围无关）
+            // 1. 三卡总览 + 今日目标进度
+            // 第一张卡**跟范围**：原来它固定全量，于是切到"本周"时同屏出现
+            // 「总专注 120h」和「累计专注 3h」——两个都叫专注总量，差 40 倍。
+            // 「今日」「连续天数」不范围化：它们是天然的跨范围概念（口径原则里的成就/里程碑类）。
             Entrance(played = entrancePlayed, delayMillis = 0) {
                 Column {
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        StatCard("总专注", stats.totalMinutes, StatValueKind.DURATION, Modifier.weight(1f))
+                        StatCard(
+                            label = when (range) {
+                                StatsRange.WEEK -> "本周专注"
+                                StatsRange.MONTH -> "本月专注"
+                                StatsRange.ALL -> "历史专注"
+                            },
+                            value = rangeStats.totalMinutes,
+                            kind = StatValueKind.DURATION,
+                            modifier = Modifier.weight(1f),
+                        )
                         StatCard("今日", stats.todayMinutes, StatValueKind.MINUTES, Modifier.weight(1f))
-                        StatCard("连续", stats.streakDays, StatValueKind.DAYS, Modifier.weight(1f))
+                        StatCard("连续天数", stats.streakDays, StatValueKind.DAYS, Modifier.weight(1f))
                     }
                     Spacer(Modifier.height(16.dp))
                     GoalCard(
@@ -194,18 +207,11 @@ fun StatsScreen(viewModel: AppViewModel) {
                         Spacer(Modifier.height(14.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             OverviewItem(
-                                label = "累计专注",
-                                value = formatMinutesHm(rangeStats.totalMinutes),
-                                modifier = Modifier.weight(1f),
-                            )
-                            OverviewItem(
                                 label = "日均",
-                                value = formatMinutesHm(rangeStats.dailyAverageMinutes),
+                                // 范围内已过天数不足时不给数字：周一算出来的"日均"就是当天总量，是个假数字
+                                value = rangeStats.dailyAverageMinutes?.let { formatMinutesHm(it) } ?: "—",
                                 modifier = Modifier.weight(1f),
                             )
-                        }
-                        Spacer(Modifier.height(12.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             OverviewItem(
                                 label = "专注次数",
                                 value = "${rangeStats.sessionCount} 次",
@@ -222,6 +228,21 @@ fun StatsScreen(viewModel: AppViewModel) {
             }
             Spacer(Modifier.height(16.dp))
 
+            // 2.5 与上一区间对比（本周 vs 上周 / 本月 vs 上月）。
+            // 「全部」档没有可比的上一区间，所以不显示——而不是显示一个假的 0。
+            val previousMinutes = rangeStats.previousMinutes
+            if (range != StatsRange.ALL && previousMinutes != null) {
+                Entrance(played = entrancePlayed, delayMillis = 120) {
+                    CompareCard(
+                        currentMinutes = rangeStats.totalMinutes,
+                        previousMinutes = previousMinutes,
+                        previousLabel = rangeStats.previousLabel.orEmpty(),
+                        changePercent = rangeStats.changePercent,
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+            }
+
             // 3. 专注趋势：全部范围按周分页（左右滑看更早），本周/本月按天
             Entrance(played = entrancePlayed, delayMillis = 160) {
                 ProCard(modifier = Modifier.fillMaxWidth()) {
@@ -234,7 +255,7 @@ fun StatsScreen(viewModel: AppViewModel) {
                                 modifier = Modifier.weight(1f),
                             )
                             Text(
-                                if (range == AppViewModel.StatsRange.ALL) {
+                                if (range == StatsRange.ALL) {
                                     "全部记录 · 右滑看更早"
                                 } else {
                                     "${range.label} · 按天"
@@ -244,7 +265,7 @@ fun StatsScreen(viewModel: AppViewModel) {
                             )
                         }
                         Spacer(Modifier.height(12.dp))
-                        if (range == AppViewModel.StatsRange.ALL) {
+                        if (range == StatsRange.ALL) {
                             if (records.isEmpty()) {
                                 Text("暂无记录，先去完成一次专注吧", fontSize = 13.sp, color = TextPlaceholder)
                             } else {
@@ -314,43 +335,66 @@ fun StatsScreen(viewModel: AppViewModel) {
             }
             Spacer(Modifier.height(16.dp))
 
-            // 7. 近 30 天热力图（固定窗口，范围外的日子淡显）
+            // 6.5 单次时长分布 + 历史最强一天
+            Entrance(played = entrancePlayed, delayMillis = 440) {
+                DurationBucketsCard(
+                    buckets = rangeStats.durationBuckets,
+                    hint = "${range.label} · 单次时长",
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+
+            // 成就类数据：**全量**（口径原则里的"成就/里程碑"），不跟范围
+            if (rangeStats.topDays.isNotEmpty()) {
+                Entrance(played = entrancePlayed, delayMillis = 460) {
+                    TopDaysCard(days = rangeStats.topDays)
+                }
+                Spacer(Modifier.height(16.dp))
+            }
+
+            // 7. 月份热力图：可左右滑动看更早的月份
             Entrance(played = entrancePlayed, delayMillis = 480) {
                 ProCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(Dimens.CardPadding)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
-                                "近 30 天",
+                                "专注热力图",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = TextPrimary,
                                 modifier = Modifier.weight(1f),
                             )
-                            Text(
-                                "${rangeStats.heatmapActiveDays} 天有记录 · 共 ${formatMinutesHm(rangeStats.heatmapMinutes)}",
-                                fontSize = 11.sp,
-                                color = TextPlaceholder,
-                            )
+                            if (rangeStats.heatMonths.size <= 1) {
+                                Text(
+                                    "${rangeStats.heatMonths.firstOrNull()?.activeDays ?: 0} 天有记录",
+                                    fontSize = 11.sp,
+                                    color = TextPlaceholder,
+                                )
+                            }
                         }
                         Spacer(Modifier.height(14.dp))
-                        MonthHeatmap(cells = rangeStats.heatmap)
+                        MonthHeatmapPager(months = rangeStats.heatMonths)
                     }
                 }
             }
             Spacer(Modifier.height(16.dp))
 
-            // 8. CSV 导出（全量）
+            // 8. CSV 导出（跟范围：选「本周」就只导本周）
             Entrance(played = entrancePlayed, delayMillis = 560) {
                 ProCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .pressScale()
-                        .clickable(enabled = records.isNotEmpty()) { showExportDialog = true },
+                        .clickable(enabled = exportRecords.isNotEmpty()) { showExportDialog = true },
                 ) {
                     Row(Modifier.padding(Dimens.RowPadding), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("导出数据", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
                             Text(
-                                if (records.isEmpty()) "暂无数据可导出" else "CSV 文件 · 共 ${records.size} 条记录",
+                                if (exportRecords.isEmpty()) {
+                                    "${range.label}暂无数据可导出"
+                                } else {
+                                    "CSV · ${range.label} ${exportRecords.size} 条记录"
+                                },
                                 fontSize = 12.sp,
                                 color = TextSecondary,
                             )
@@ -409,7 +453,7 @@ fun StatsScreen(viewModel: AppViewModel) {
             dismissButton = {
                 TextButton(
                     onClick = {
-                        CsvExporter.share(context, exportMode, records, tasks, categories)
+                        CsvExporter.share(context, exportMode, exportRecords, tasks, categories)
                         showExportDialog = false
                     },
                 ) {
@@ -473,7 +517,8 @@ private fun GoalCard(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                "最长连续 $bestStreakDays 天 · 近 7 天达成 $goalHitDaysInWeek/7",
+                // 「最近 7 天」是**滚动**窗口，不是本周——同屏有「本周/本月」档位，写"近 7 天"容易被读成本周
+                "最长连续 $bestStreakDays 天 · 最近 7 天达成 $goalHitDaysInWeek/7",
                 fontSize = 12.sp,
                 color = TextPlaceholder,
             )
@@ -603,6 +648,164 @@ private fun DistributionCard(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+private val WeekdayShort = listOf("一", "二", "三", "四", "五", "六", "日")
+
+/**
+ * 与上一区间对比卡（本周 vs 上周 / 本月 vs 上月）。
+ * 上一区间为 0 时不编造百分比——"从 0 涨到 100%"没有意义，直接说明"上一区间没有记录"。
+ */
+@Composable
+private fun CompareCard(
+    currentMinutes: Int,
+    previousMinutes: Int,
+    previousLabel: String,
+    changePercent: Int?,
+) {
+    val accent = if (currentMinutes >= previousMinutes) AccentGreen else WarningAmber
+    ProCard(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(Dimens.CardPadding)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "与$previousLabel 对比",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = when {
+                        changePercent == null -> "上一区间无记录"
+                        changePercent > 0 -> "↑ $changePercent%"
+                        changePercent < 0 -> "↓ ${-changePercent}%"
+                        else -> "持平"
+                    },
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = if (changePercent == null) TextPlaceholder else accent,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OverviewItem("本期", formatMinutesHm(currentMinutes), Modifier.weight(1f))
+                OverviewItem(previousLabel, formatMinutesHm(previousMinutes), Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+/** 单次时长分布（跟范围）：一眼看出自己主要在"短平快"还是"长时段" */
+@Composable
+private fun DurationBucketsCard(buckets: List<StatsRules.DurationBucket>, hint: String) {
+    val total = buckets.sumOf { it.count }
+    ProCard(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(Dimens.CardPadding)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "单次时长分布",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(hint, fontSize = 11.sp, color = TextPlaceholder)
+            }
+            Spacer(Modifier.height(14.dp))
+            if (total == 0) {
+                Text("${hint.substringBefore(" ·")}暂无记录", fontSize = 13.sp, color = TextPlaceholder)
+            } else {
+                val maxCount = buckets.maxOf { it.count }.coerceAtLeast(1)
+                buckets.forEach { bucket ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            bucket.label,
+                            fontSize = 12.sp,
+                            color = TextSecondary,
+                            modifier = Modifier.width(56.dp),
+                        )
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(14.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(CardCream),
+                        ) {
+                            if (bucket.count > 0) {
+                                Box(
+                                    Modifier
+                                        .fillMaxWidth(bucket.count.toFloat() / maxCount)
+                                        .height(14.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(Primary.copy(alpha = 0.7f)),
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "${bucket.count} 次",
+                            fontSize = 11.sp,
+                            color = TextPlaceholder,
+                            modifier = Modifier.width(42.dp),
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                }
+            }
+        }
+    }
+}
+
+/** 历史最强的一天 Top N —— **全量**口径（准则里的"成就/里程碑类"不跟范围） */
+@Composable
+private fun TopDaysCard(days: List<StatsRules.TopDay>) {
+    ProCard(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(Dimens.CardPadding)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "最强的一天",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TextPrimary,
+                    modifier = Modifier.weight(1f),
+                )
+                Text("历史 · 前 ${days.size}", fontSize = 11.sp, color = TextPlaceholder)
+            }
+            Spacer(Modifier.height(12.dp))
+            days.forEachIndexed { index, day ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(20.dp)
+                            .clip(CircleShape)
+                            .background(if (index == 0) Gold else CardCream),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            "${index + 1}",
+                            fontSize = 11.sp,
+                            color = if (index == 0) Color.White else TextSecondary,
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        "%d 月 %d 日 · 周%s".format(
+                            day.date.monthValue,
+                            day.date.dayOfMonth,
+                            WeekdayShort[day.date.dayOfWeek.value - 1],
+                        ),
+                        fontSize = 13.sp,
+                        color = TextPrimary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        formatMinutesHm(day.minutes),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Primary,
+                    )
+                }
+                if (index < days.lastIndex) Spacer(Modifier.height(10.dp))
             }
         }
     }
