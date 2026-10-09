@@ -95,6 +95,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.flowtime.data.AppSettings
+import com.example.flowtime.data.BackfillRules
 import com.example.flowtime.data.FlowTimeRepository
 import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.components.ProCard
@@ -804,11 +805,12 @@ private fun ProfileDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
 @Composable
 private fun DurationDialog(settings: AppSettings, viewModel: AppViewModel, onDismiss: () -> Unit) {
     val options = listOf(15, 25, 30, 45, 60)
-    // 上限统一 480（8h）：原来这里单独卡 240，而首页倒计时弹层和补录都是 480，
-    // 三处口径不一致会让"设置里选 4h、首页能选 8h"看着像两套规则。
-    var minutes by remember { mutableStateOf(settings.defaultDurationMinutes.coerceIn(1, 480)) }
-    val valid = minutes in 1..480
-    // 8h 可能跨夜，选到跨天时把结束时刻说清楚（否则用户以为最多到今晚）
+    // 上限与补录/倒计时统一到 BackfillRules.MAX_MINUTES（24h）。
+    // 这里曾单独卡 240，后来统一成 480，2026-10-09 又一起提到 1440——
+    // 三处共用一个常量，就不会再出现"这里能选 8h、那里只能选 4h"的错位。
+    var minutes by remember { mutableStateOf(settings.defaultDurationMinutes.coerceIn(1, BackfillRules.MAX_MINUTES)) }
+    val valid = minutes in 1..BackfillRules.MAX_MINUTES
+    // 长时长会跨夜，选到跨天时把结束时刻说清楚（否则用户以为最多到今晚）
     val startNow = remember { LocalDateTime.now() }
     val endAt = startNow.plusMinutes(minutes.toLong())
     val crossesDay = endAt.toLocalDate() != startNow.toLocalDate()
@@ -833,8 +835,8 @@ private fun DurationDialog(settings: AppSettings, viewModel: AppViewModel, onDis
                 HourMinuteWheel(
                     hours = minutes / 60,
                     minutes = minutes % 60,
-                    onChange = { h, m -> minutes = (h * 60 + m).coerceIn(1, 480) },
-                    maxTotalMinutes = 480,
+                    onChange = { h, m -> minutes = (h * 60 + m).coerceIn(1, BackfillRules.MAX_MINUTES) },
+                    maxTotalMinutes = BackfillRules.MAX_MINUTES,
                 )
                 if (crossesDay) {
                     Spacer(Modifier.height(8.dp))

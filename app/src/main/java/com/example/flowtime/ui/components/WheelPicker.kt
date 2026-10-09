@@ -216,27 +216,38 @@ fun WheelColumn(
     }
 }
 
-/** 一行「小时 + 分钟」滚轮：外圈画选中带与淡出遮罩，内部两列共用 */
+/** 一天的总分钟数：时/分两列不设人为截断时的兜底上限 */
+private const val MINUTES_PER_DAY = 24 * 60
+
+/**
+ * 一行「小时 + 分钟」滚轮：外圈画选中带与淡出遮罩，内部两列共用。
+ *
+ * 2026-10-09 重构：**两列的长度互不依赖**。
+ * 早先的写法是"分钟上限依赖小时、小时上限依赖分钟"，看着像"让人根本选不出错"，
+ * 实测会出两个怪现象：
+ * - 分钟停在 30 时去拨小时，拨到 8 会因为 8h30m 超限，把小时列从 0..8 缩成 0..7，
+ *   刚拨上去的 8 被**静默顶回 7**；
+ * - 分钟停在 59 时，小时列只到 17，18:00 这种完全合法的组合反而**拨不到**。
+ *
+ * 现在小时列固定 0..maxHours、分钟列固定 0..59，超限时**只压分钟**，绝不动刚拨的那一列。
+ * 上限判定的落点：[maxTotalMinutes] 之内任意组合都能选出来（默认整天 1440）。
+ */
 @Composable
 fun HourMinuteWheel(
     hours: Int,
     minutes: Int,
     onChange: (hours: Int, minutes: Int) -> Unit,
-    maxTotalMinutes: Int = 480,
+    maxTotalMinutes: Int = MINUTES_PER_DAY,
     modifier: Modifier = Modifier,
     columnWidth: Dp = 72.dp,
     fadeColor: Color? = null,
 ) {
-    val maxHours = (maxTotalMinutes / 60).coerceAtLeast(1)
+    val maxHours = (maxTotalMinutes / 60).coerceIn(0, 24)
     val h = hours.coerceIn(0, maxHours)
-    val m = minutes.coerceIn(0, 59)
-    // 上限从"事后归零"改成"源头约束"（HIG entering-data：让人根本选不出错）：
-    // 分钟 >0 时小时轮压根没有 08 这一格；小时=8 时分钟列只剩 00。
-    // 之前是让用户选出 8h45 再把 45 悄悄抹成 0——用户反馈"为什么直接归0了"。
-    val hourMax = ((maxTotalMinutes - m) / 60).coerceIn(0, maxHours)
-    val minuteMax = (maxTotalMinutes - h * 60).coerceIn(0, 59)
-    val hourItems = remember(maxTotalMinutes, hourMax) { (0..hourMax).map { "%02d".format(it) } }
-    val minuteItems = remember(maxTotalMinutes, minuteMax) { (0..minuteMax).map { "%02d".format(it) } }
+    // 显示也按上限夹一次：否则会画出"08:30"这种其实不存在的组合
+    val m = minutes.coerceIn(0, (maxTotalMinutes - h * 60).coerceIn(0, 59))
+    val hourItems = remember(maxHours) { (0..maxHours).map { "%02d".format(it) } }
+    val minuteItems = remember { (0..59).map { "%02d".format(it) } }
 
     Box(modifier.fillMaxWidth().height(WheelHeight), contentAlignment = Alignment.Center) {
         WheelSelectionBand()
@@ -248,7 +259,11 @@ fun HourMinuteWheel(
             WheelColumn(
                 items = hourItems,
                 selectedIndex = h,
-                onIndexChange = { picked -> onChange(picked, m) },
+                onIndexChange = { picked ->
+                    // 只把分钟压到合法值，picked 原样写回 —— 出现"拨到 8 又跳回 7"就是这里没做好
+                    val rest = (maxTotalMinutes - picked * 60).coerceIn(0, 59)
+                    onChange(picked, m.coerceAtMost(rest))
+                },
                 modifier = Modifier.width(columnWidth),
                 fadeColor = fadeColor,
             )
@@ -258,7 +273,10 @@ fun HourMinuteWheel(
             WheelColumn(
                 items = minuteItems,
                 selectedIndex = m,
-                onIndexChange = { picked -> onChange(h, picked) },
+                onIndexChange = { picked ->
+                    val rest = (maxTotalMinutes - h * 60).coerceIn(0, 59)
+                    onChange(h, picked.coerceAtMost(rest))
+                },
                 modifier = Modifier.width(columnWidth),
                 fadeColor = fadeColor,
             )
@@ -280,7 +298,7 @@ fun DurationWheelBlock(
     minutes: Int,
     onChange: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    maxTotalMinutes: Int = 480,
+    maxTotalMinutes: Int = MINUTES_PER_DAY,
     columnWidth: Dp = 72.dp,
     fadeColor: Color? = null,
 ) {

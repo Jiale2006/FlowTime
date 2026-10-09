@@ -86,10 +86,20 @@ class BackfillRulesTest {
     }
 
     @Test
-    fun `时长越界被夹到 1 到 480`() {
+    fun `时长越界被夹到上限`() {
         assertEquals(1, BackfillRules.resolve(today, 20, 0, 0, ms(2026, 10, 9, 22, 0), zone).minutes)
         assertEquals(1, BackfillRules.resolve(today, 20, 0, -5, ms(2026, 10, 9, 22, 0), zone).minutes)
-        assertEquals(480, BackfillRules.resolve(today, 20, 0, 999, ms(2026, 10, 9, 22, 0), zone).minutes)
+        assertEquals(
+            BackfillRules.MAX_MINUTES,
+            BackfillRules.resolve(today, 20, 0, 9999, ms(2026, 10, 9, 22, 0), zone).minutes,
+        )
+    }
+
+    @Test
+    fun `时长上限是 24 小时，能补一整段`() {
+        assertEquals(24 * 60, BackfillRules.MAX_MINUTES)
+        // 补"上午 8 点到晚上 8 点"这种 12 小时的段：上限内必须原样保留
+        assertEquals(720, BackfillRules.resolve(today, 20, 0, 720, ms(2026, 10, 9, 22, 0), zone).minutes)
     }
 
     // ---- endCapMinutes ----
@@ -355,11 +365,11 @@ class BackfillRulesTest {
     }
 
     @Test
-    fun `改时长同样受 1 到 480 约束`() {
+    fun `改时长同样受上下限约束`() {
         val end = ms(2026, 10, 9, 15, 0)
         val manual = record(minutes = 30, startMs = end - 30 * 60_000L, endMs = end, source = RecordSource.MANUAL)
         assertEquals(1, BackfillRules.withDuration(manual, 0)!!.minutes)
-        assertEquals(480, BackfillRules.withDuration(manual, 9999)!!.minutes)
+        assertEquals(BackfillRules.MAX_MINUTES, BackfillRules.withDuration(manual, 99999)!!.minutes)
     }
 
     // ---- RecordSource 宽容解析 ----

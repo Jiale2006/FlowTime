@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
@@ -24,6 +25,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.GlassFillHigh
@@ -84,8 +86,16 @@ fun FlowAlertDialog(
     text: (@Composable () -> Unit)? = null,
     confirmButton: @Composable () -> Unit = {},
     dismissButton: (@Composable () -> Unit)? = null,
+    /**
+     * 宽版：内容比普通对话框宽时用（如补录的月历要摆 7 列）。
+     * 默认宽度在手机上约 320dp，7 列会被压到每格 ~34dp，低于最小触控目标。
+     */
+    wide: Boolean = false,
 ) {
-    Dialog(onDismissRequest = onDismissRequest) {
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(usePlatformDefaultWidth = !wide),
+    ) {
         val palette = ActivePalette
 
         // 背景模糊（API 31+）：玻璃主题半径最大 + 压暗更多（玻璃要有东西可模糊）；
@@ -101,6 +111,9 @@ fun FlowAlertDialog(
         // 越界部分首帧会被裁掉、下一帧才显形（观感"慢半拍"）。留白让它们从第一帧就在窗口内。
         Box(
             modifier = Modifier
+                // 宽版先限最大宽度再撑满：顺序反了 min 会大于 max
+                // （fillMaxWidth 会把 min/max 一起钉住，后面的 widthIn 就压不下去）
+                .then(if (wide) Modifier.widthIn(max = 420.dp) else Modifier)
                 .fillMaxWidth()
                 .padding(horizontal = 10.dp, vertical = 18.dp),
         ) {

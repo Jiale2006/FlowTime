@@ -65,6 +65,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.flowtime.data.BackfillRules
 import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.components.AmbientParticles
 import com.example.flowtime.ui.components.CategoryBadge
@@ -570,15 +571,15 @@ fun TimerScreen(
                 HourMinuteWheel(
                     hours = pickerMinutes / 60,
                     minutes = pickerMinutes % 60,
-                    onChange = { h, m -> pickerMinutes = (h * 60 + m).coerceIn(0, 480) },
-                    maxTotalMinutes = 480,
+                    onChange = { h, m -> pickerMinutes = (h * 60 + m).coerceIn(0, BackfillRules.MAX_MINUTES) },
+                    maxTotalMinutes = BackfillRules.MAX_MINUTES,
                     // 弹层底色就是 PaperElevated，遮罩按它叠才不穿帮
                     fadeColor = PaperElevated,
                 )
                 Spacer(Modifier.height(10.dp))
                 // 结束时刻预览：市面计时软件必备，用户要的是"几点结束"这个信息。
                 // 跨天时额外标出来——8h 倒计时常在夜里设，不说清楚会以为最多到今晚。
-                val validPick = pickerMinutes in 1..480
+                val validPick = pickerMinutes in 1..BackfillRules.MAX_MINUTES
                 Text(
                     durationPreviewText(pickerMinutes),
                     fontSize = 13.sp,
@@ -594,7 +595,7 @@ fun TimerScreen(
                 ) {
                     TextButton(
                         onClick = {
-                            viewModel.selectDuration(pickerMinutes.coerceIn(1, 480))
+                            viewModel.selectDuration(pickerMinutes.coerceIn(1, BackfillRules.MAX_MINUTES))
                             showDurationPicker = false
                         },
                         enabled = validPick,
@@ -604,7 +605,7 @@ fun TimerScreen(
                     }
                     Button(
                         onClick = {
-                            val picked = pickerMinutes.coerceIn(1, 480)
+                            val picked = pickerMinutes.coerceIn(1, BackfillRules.MAX_MINUTES)
                             viewModel.selectDuration(picked)
                             viewModel.startFocus()
                             showDurationPicker = false
@@ -615,7 +616,7 @@ fun TimerScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = Primary),
                     ) {
                         Text(
-                            "开始 ${durationLabel(pickerMinutes.coerceIn(1, 480))} 倒计时",
+                            "开始 ${durationLabel(pickerMinutes.coerceIn(1, BackfillRules.MAX_MINUTES))} 倒计时",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Light,
                         )

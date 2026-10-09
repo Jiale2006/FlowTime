@@ -261,7 +261,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** 选择开始时长（仅待机态；倒计时/番茄生效并同步待机环时长） */
     fun selectDuration(minutes: Int) {
         if (_timer.value.phase != TimerPhase.IDLE) return
-        val m = minutes.coerceIn(1, 480)
+        val m = minutes.coerceIn(1, BackfillRules.MAX_MINUTES)
         userPickedDuration = true
         _selectedDurationMinutes.value = m
         if (_timer.value.mode != TimerMode.COUNT_UP) {

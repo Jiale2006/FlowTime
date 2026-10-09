@@ -17,7 +17,12 @@ import java.time.ZoneId
 object BackfillRules {
 
     const val MIN_MINUTES = 1
-    const val MAX_MINUTES = 480
+    /**
+     * 单次记录 / 补录的时长上限：24 小时。
+     * 2026-10-09 由 480（8h）提到 1440——"补一整天"这种段原来根本选不出来，
+     * 表现就是"小时列最多只能拨到 8"。三处（补录 / 倒计时 / 设置页默认值）共用这一个上限。
+     */
+    const val MAX_MINUTES = 24 * 60
     /** 任务无历史时的默认时长 */
     const val DEFAULT_MINUTES = 30
     /** 无历史时兜底的结束小时 */

@@ -70,11 +70,14 @@ private data class Seed(
     val durationMinutes: Int,
 )
 
-/** 哪个字段的滚轮选择器开着 */
-private enum class FieldPicker { NONE, END_TIME, DURATION }
+/** 哪个字段的选择器开着（全部走居中对话框，与贴底弹窗不同侧，层次一眼能看懂） */
+private enum class FieldPicker { NONE, END_TIME, DURATION, DATE }
 
 /** 「记到」标签里未分类的写法 */
 private const val FREE_FOCUS_LABEL = "未分类（自由专注）"
+
+/** 一天的总分钟数：结束时刻选择器要覆盖整天任意时刻 */
+private const val MINUTES_PER_DAY = 24 * 60
 
 /**
  * 补录时间（一步式底部弹窗）——任务详情页和首页共用。
@@ -123,7 +126,6 @@ fun BackfillDialog(
         Seed(d.daysAgo, end.hour, end.minute, adjusted.minutes)
     }
     var daysAgo by remember(seed) { mutableStateOf(seed.daysAgo) }
-    var showCalendar by remember(seed) { mutableStateOf(false) }
     var endHour by remember(seed) { mutableStateOf(seed.endHour) }
     var endMinute by remember(seed) { mutableStateOf(seed.endMinute) }
     var duration by remember(seed) { mutableStateOf(seed.durationMinutes) }
@@ -239,34 +241,15 @@ fun BackfillDialog(
                     DayQuickChip(
                         label = pastDayLabel(today, offset),
                         selected = daysAgo == offset,
-                        onClick = {
-                            daysAgo = offset
-                            showCalendar = false
-                        },
+                        onClick = { daysAgo = offset },
                         modifier = Modifier.weight(1f),
                     )
                 }
                 DayQuickChip(
                     label = if (daysAgo > 2) pastDayLabel(today, daysAgo) else "更多",
                     selected = daysAgo > 2,
-                    onClick = { showCalendar = !showCalendar },
+                    onClick = { picker = FieldPicker.DATE },
                     modifier = Modifier.weight(1f),
-                )
-            }
-
-            // 「更多」就地展开月历（弹窗会长高，但仍在屏内）
-            if (showCalendar) {
-                Spacer(Modifier.height(12.dp))
-                MonthCalendar(
-                    months = calendarMonths,
-                    minutesByDate = minutesByDate,
-                    selected = date,
-                    maxSelectable = today,
-                    today = today,
-                    onSelect = { picked ->
-                        daysAgo = ChronoUnit.DAYS.between(picked, today).toInt().coerceAtLeast(0)
-                        showCalendar = false
-                    },
                 )
             }
 
@@ -326,17 +309,24 @@ fun BackfillDialog(
         }
     }
 
-    // 字段滚轮选择器：居中对话框（与贴底弹窗不同侧，层次一眼能看懂）
+    // 字段选择器：一律居中对话框（与贴底弹窗不同侧，层次一眼能看懂）
     when (picker) {
         FieldPicker.END_TIME -> WheelPickerDialog(
             title = "结束时间",
             initialMinutes = endHour * 60 + endMinute,
-            maxTotalMinutes = capMinutes,
+            // 滚轮覆盖整天任意时刻：能拨到才不憋屈，"不能补未来"改由确定时兜住
+            maxTotalMinutes = MINUTES_PER_DAY - 1,
             summary = { total -> "%02d:%02d".format(total / 60, total % 60) },
+            clampTo = if (daysAgo == 0) capMinutes else null,
+            clampNote = "今天最晚 %02d:%02d，超出会按这个时间记录".format(
+                capMinutes / 60,
+                capMinutes % 60,
+            ),
             onDismiss = { picker = FieldPicker.NONE },
             onConfirm = { total ->
-                endHour = total / 60
-                endMinute = total % 60
+                val safe = if (daysAgo == 0) total.coerceAtMost(capMinutes) else total
+                endHour = safe / 60
+                endMinute = safe % 60
                 picker = FieldPicker.NONE
             },
         )
@@ -353,6 +343,19 @@ fun BackfillDialog(
             },
         )
 
+        FieldPicker.DATE -> CalendarPickerDialog(
+            months = calendarMonths,
+            minutesByDate = minutesByDate,
+            selected = date,
+            maxSelectable = today,
+            today = today,
+            onDismiss = { picker = FieldPicker.NONE },
+            onSelect = { picked ->
+                daysAgo = ChronoUnit.DAYS.between(picked, today).toInt().coerceAtLeast(0)
+                picker = FieldPicker.NONE
+            },
+        )
+
         FieldPicker.NONE -> Unit
     }
 }
@@ -360,6 +363,9 @@ fun BackfillDialog(
 /**
  * 滚轮选择对话框：时/分两列 + 确定。
  * 滚轮改动先攒在 [pending] 里，点「确定」才回写——不然拨动过程中外层字段会一直跳。
+ *
+ * [clampTo] 是确定时的硬上限（如"今天不能补未来"）。滚轮本身**不做这个限制**：
+ * 拨不到会让人以为控件坏了，拨得到再兜住并写清"会按哪个时间记录"才说得过去。
  */
 @Composable
 private fun WheelPickerDialog(
@@ -369,8 +375,11 @@ private fun WheelPickerDialog(
     summary: (Int) -> String,
     onDismiss: () -> Unit,
     onConfirm: (Int) -> Unit,
+    clampTo: Int? = null,
+    clampNote: String = "",
 ) {
     var pending by remember { mutableStateOf(initialMinutes.coerceIn(0, maxTotalMinutes)) }
+    val overLimit = clampTo != null && pending > clampTo
 
     FlowAlertDialog(
         onDismissRequest = onDismiss,
@@ -385,15 +394,59 @@ private fun WheelPickerDialog(
                     columnWidth = 62.dp,
                 )
                 Spacer(Modifier.height(8.dp))
-                Text(summary(pending), fontSize = 12.sp, color = TextSecondary)
+                Text(
+                    summary(pending),
+                    fontSize = 12.sp,
+                    color = if (overLimit) WarningAmber else TextSecondary,
+                )
+                if (overLimit) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(clampNote, fontSize = 11.sp, color = WarningAmber)
+                }
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(pending) }) {
+            TextButton(onClick = {
+                onConfirm(if (clampTo != null) pending.coerceAtMost(clampTo) else pending)
+            }) {
                 Text("确定", color = Primary, fontWeight = FontWeight.Medium)
             }
         },
         dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
+}
+
+/**
+ * 日期选择对话框：宽版居中对话框里放月历（7 列需要宽度，普通对话框只有 ~320dp，
+ * 每格会被压到 34dp 左右，低于最小触控目标）。点日期即选中并关闭。
+ */
+@Composable
+private fun CalendarPickerDialog(
+    months: List<YearMonth>,
+    minutesByDate: Map<LocalDate, Int>,
+    selected: LocalDate,
+    maxSelectable: LocalDate,
+    today: LocalDate,
+    onDismiss: () -> Unit,
+    onSelect: (LocalDate) -> Unit,
+) {
+    FlowAlertDialog(
+        onDismissRequest = onDismiss,
+        wide = true,
+        title = { Text("选择日期", fontWeight = FontWeight.Medium) },
+        text = {
+            MonthCalendar(
+                months = months,
+                minutesByDate = minutesByDate,
+                selected = selected,
+                maxSelectable = maxSelectable,
+                today = today,
+                onSelect = onSelect,
+            )
+        },
+        confirmButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
         },
     )
