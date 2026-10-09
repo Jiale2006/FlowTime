@@ -38,6 +38,10 @@ import java.time.YearMonth
  * 与 [MonthHeatmap] 的区别 —— 那个是**只读**的"坚持情况"展示，这个是**可选**的日期选择器：
  * 带选中态、今天标记、未来日期置灰。色阶复用 [heatColorOf]，两处观感一致。
  *
+ * 翻月方向按日历惯例：**左滑看更晚、右滑看更早**（months 由早到晚排列，今天所在月是最后一页，
+ * 所以左滑到当月就是尽头——未来不可补）。
+ * 注意**不要**加 `reverseLayout = true`：那会把列表镜像，变成"左滑看更早"，与惯例相反。
+ *
  * 格子背景淡染当天已有的专注时长，是为了让**空白的那几天自己跳出来**——
  * 补录要解决的就是"我哪天忘了记"，比让用户翻着数日子有用。
  *
@@ -70,13 +74,12 @@ fun MonthCalendar(
                 modifier = Modifier.weight(1f),
             )
             if (months.size > 1) {
-                Text("左右滑翻月", fontSize = 11.sp, color = TextPlaceholder)
+                Text("右滑看更早的月份", fontSize = 11.sp, color = TextPlaceholder)
             }
         }
         Spacer(Modifier.height(8.dp))
         HorizontalPager(
             state = pagerState,
-            reverseLayout = true,
             modifier = Modifier.fillMaxWidth(),
         ) { page ->
             MonthGrid(

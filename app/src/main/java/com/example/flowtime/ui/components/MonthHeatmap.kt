@@ -134,6 +134,9 @@ fun MonthHeatmap(
 /**
  * 可左右滑动的月份热力图：一页一个月，右滑看更早的月份。
  * 表头的"当月统计"跟着当前页走，所以直接放在每一页里画。
+ *
+ * 翻月方向按日历惯例（右滑看更早、左滑看更晚）。**别加 `reverseLayout = true`**：
+ * 那会把列表镜像成"左滑看更早"，正好和下面那句提示、以及所有日历 App 的手感相反。
  */
 @Composable
 fun MonthHeatmapPager(
@@ -162,7 +165,6 @@ fun MonthHeatmapPager(
         Spacer(Modifier.height(10.dp))
         HorizontalPager(
             state = pagerState,
-            reverseLayout = true,
             modifier = Modifier.fillMaxWidth(),
         ) { page ->
             MonthHeatmap(
