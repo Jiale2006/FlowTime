@@ -65,6 +65,7 @@ import com.example.flowtime.ui.components.ProCard
 import com.example.flowtime.ui.components.WeeklyBarsPager
 import com.example.flowtime.ui.components.formatMinutesHm
 import com.example.flowtime.ui.components.rememberCountUp
+import com.example.flowtime.ui.components.rememberCountUpFloat
 import com.example.flowtime.ui.components.pressScale
 import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.AccentGreen
@@ -497,12 +498,10 @@ private fun GoalCard(
     modifier: Modifier = Modifier,
 ) {
     val progress = if (goalMinutes <= 0) 0f else (todayMinutes.toFloat() / goalMinutes).coerceIn(0f, 1f)
-    // 今日目标只动进度条：数字保持静态（滚动会让"还差多少"跟着跳，读着累）
-    val animatedProgress by animateFloatAsState(
-        targetValue = progress,
-        animationSpec = tween(900, delayMillis = DelayTop + CountLag, easing = FastOutSlowInEasing),
-        label = "goalProgress",
-    )
+    // 今日目标只动进度条：数字保持静态（滚动会让"还差多少"跟着跳，读着累）。
+    // 进度条必须走 rememberCountUpFloat —— 直接 animateFloatAsState(progress) 的话
+    // 首帧起点就是真实比例，条一上来就是满的，等于没动。
+    val animatedProgress = rememberCountUpFloat(progress, delayMillis = DelayTop + CountLag)
     val done = goalMinutes > 0 && todayMinutes >= goalMinutes
     ProCard(modifier = modifier.fillMaxWidth()) {
         Column(Modifier.padding(Dimens.CardPadding)) {
