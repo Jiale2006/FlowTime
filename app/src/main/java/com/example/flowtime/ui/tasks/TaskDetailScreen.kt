@@ -105,9 +105,10 @@ fun TaskDetailScreen(
     }
     var showBackfill by remember { mutableStateOf(false) }
     var showEditor by remember { mutableStateOf(false) }
-    // 正在改时长的记录（仅手动补录） / 刚被删掉、还在撤销窗口里的记录
+    // 正在改时长的记录（仅手动补录） / 刚被删掉、刚补录进来，还在撤销窗口里的记录
     var editingRecord by remember { mutableStateOf<FocusRecord?>(null) }
     var deletedRecord by remember { mutableStateOf<FocusRecord?>(null) }
+    var addedRecord by remember { mutableStateOf<FocusRecord?>(null) }
     val (cardColor, cardFg) = TaskCardPalette[(task?.colorIndex ?: 0) % TaskCardPalette.size]
 
     Box(
@@ -377,26 +378,37 @@ fun TaskDetailScreen(
             }
         }
 
-        // 删除撤销条：贴在底部按钮上方，超时自动消失
+        // 撤销条：删除与补录共用（补录写错了不用再去"全部记录"里长按删）
         RecordUndoBar(
-            visible = deletedRecord != null,
+            visible = deletedRecord != null || addedRecord != null,
+            message = when {
+                addedRecord != null -> "已补录 ${formatMinutesHm(addedRecord!!.minutes)}"
+                else -> "记录已删除"
+            },
             onUndo = {
                 deletedRecord?.let { viewModel.restoreRecord(it) }
+                addedRecord?.let { viewModel.deleteRecord(it.id) }
                 deletedRecord = null
+                addedRecord = null
             },
-            onExpire = { deletedRecord = null },
+            onExpire = {
+                deletedRecord = null
+                addedRecord = null
+            },
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 84.dp),
         )
     }
 
-    if (showBackfill && task != null) {
+    if (showBackfill) {
         BackfillDialog(
-            taskId = task.id,
-            taskName = task.name,
+            tasks = tasks,
+            initialTaskId = task?.id,
             records = records,
             onDismiss = { showBackfill = false },
-            onConfirm = { startMillis, endMillis ->
-                viewModel.addManualRecord(task, startMillis, endMillis)
+            onConfirm = { picked, startMillis, endMillis ->
+                viewModel.addManualRecord(picked, startMillis, endMillis) { added ->
+                    addedRecord = added
+                }
                 showBackfill = false
             },
         )

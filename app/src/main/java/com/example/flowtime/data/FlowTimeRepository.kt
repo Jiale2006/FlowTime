@@ -179,9 +179,8 @@ class FlowTimeRepository(private val context: Context) {
         dao.deleteTasks(removeIds.toList())
     }
 
-    suspend fun addRecord(record: FocusRecord) {
-        dao.insertRecord(record)
-    }
+    /** 插一条记录，返回新 rowid */
+    suspend fun addRecord(record: FocusRecord): Long = dao.insertRecord(record)
 
     /** 改一条记录（手动补录改时长用；结束时刻保持不变由调用方算好） */
     suspend fun updateRecord(record: FocusRecord) {

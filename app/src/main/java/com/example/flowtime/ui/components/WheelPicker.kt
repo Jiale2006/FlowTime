@@ -8,8 +8,6 @@ import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -271,58 +269,36 @@ fun HourMinuteWheel(
 }
 
 /**
- * 时长快选 chip 行（15 / 25 / 30 / 45 / 60 / 90 …）——市面计时软件的标准做法：
- * 常用值一键命中，滚轮只用来微调。
- * 命中 selected 时用主题绿底 + 主色字，与 ModeSelector 的 chip 观感一致。
+ * 时长滚轮（补录选时长、改时长共用）。
+ *
+ * 2026-10-09 定稿：**不再带快选 chip**——补录的主场景是"补昨天那一整段"，
+ * 默认值由 `BackfillRules` 猜，多数时候不用碰滚轮；chip 反倒占掉本可以用来
+ * 压缩弹层高度的空间。滚轮本身覆盖 0–8h 任意值。
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun DurationQuickChips(
+fun DurationWheelBlock(
     minutes: Int,
-    onPick: (Int) -> Unit,
+    onChange: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    options: List<Int> = defaultDurationQuickChips,
-    labelOf: (Int) -> String = ::durationChipLabel,
+    maxTotalMinutes: Int = 480,
+    columnWidth: Dp = 72.dp,
+    fadeColor: Color? = null,
 ) {
-    FlowRow(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        options.forEach { value ->
-            val selected = value == minutes
-            Box(
-                modifier = Modifier
-                    .clip(ActiveChipShape)
-                    .background(if (selected) CardGreenLight else Color.Transparent)
-                    .clickable { onPick(value) }
-                    .padding(horizontal = 14.dp, vertical = 7.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    text = labelOf(value),
-                    fontSize = 13.sp,
-                    fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-                    color = if (selected) Primary else TextSecondary,
-                )
-            }
-        }
-    }
-}
-
-private val ActiveChipShape = RoundedCornerShape(9.dp)
-
-/** 倒计时 / 补录时长的默认快选值 */
-val defaultDurationQuickChips: List<Int> = listOf(15, 25, 30, 45, 60, 90)
-
-/** chip 文案：整小时写 1h，1.5 小时写 1.5h，其余 30min 风格 */
-fun durationChipLabel(minutes: Int): String = when {
-    minutes < 60 -> "${minutes}min"
-    minutes % 60 == 0 -> "${minutes / 60}h"
-    else -> "${minutes / 60}.${(minutes % 60) * 10 / 60}h"
+    val safeMinutes = minutes.coerceIn(0, maxTotalMinutes)
+    HourMinuteWheel(
+        hours = safeMinutes / 60,
+        minutes = safeMinutes % 60,
+        onChange = { h, m -> onChange((h * 60 + m).coerceIn(0, maxTotalMinutes)) },
+        maxTotalMinutes = maxTotalMinutes,
+        modifier = modifier,
+        columnWidth = columnWidth,
+        fadeColor = fadeColor,
+    )
 }
 
 private val WeekdayLabels = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+
+private val ActiveChipShape = RoundedCornerShape(9.dp)
 
 /** 过去某天的短标签：今天 / 昨天 / 前天 / 10-06 周二（daysAgo = 距今天数） */
 fun pastDayLabel(today: LocalDate, daysAgo: Int): String = pastDayLabelOf(
@@ -388,33 +364,6 @@ fun DayQuickChip(
             fontSize = 13.sp,
             fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
             color = if (selected) Primary else TextSecondary,
-        )
-    }
-}
-
-/** 时长滚轮 + 上方快选 chip 的一体化控件（倒计时选时长、补录选时长共用） */
-@Composable
-fun DurationWheelBlock(
-    minutes: Int,
-    onChange: (Int) -> Unit,
-    modifier: Modifier = Modifier,
-    maxTotalMinutes: Int = 480,
-    quickChips: List<Int> = defaultDurationQuickChips,
-    columnWidth: Dp = 72.dp,
-    fadeColor: Color? = null,
-) {
-    val maxHours = (maxTotalMinutes / 60).coerceAtLeast(1)
-    val safeMinutes = minutes.coerceIn(0, maxTotalMinutes)
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        DurationQuickChips(minutes = safeMinutes, onPick = onChange)
-        Spacer(Modifier.height(6.dp))
-        HourMinuteWheel(
-            hours = safeMinutes / 60,
-            minutes = safeMinutes % 60,
-            onChange = { h, m -> onChange((h * 60 + m).coerceIn(0, maxTotalMinutes)) },
-            maxTotalMinutes = maxTotalMinutes,
-            columnWidth = columnWidth,
-            fadeColor = fadeColor,
         )
     }
 }

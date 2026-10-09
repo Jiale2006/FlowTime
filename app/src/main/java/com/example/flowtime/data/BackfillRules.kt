@@ -10,7 +10,9 @@ import java.time.ZoneId
  * 口径（2026-10-09 grill 定稿）：
  * - 锚点是**结束时刻**，开始时刻 = 结束 − 时长；
  * - **跨天溢出放行**：开始时刻落到前一天不钳制、不警告；
- * - 选「今天」时结束时刻不能超过此刻（超出则把结束钉在此刻，**时长保持不变**，开始时刻自动回退）。
+ * - 选「今天」时结束时刻不能超过此刻（超出则把结束钉在此刻，**时长保持不变**，开始时刻自动回退）；
+ * - 弹层初始值固定落在**昨天**（主场景是补昨天/前天忘掉的那一整段），见 [defaultsFor]；
+ * - 猜出的初始值撞上已有记录时**往后自动避让**，护栏见 [avoidOverlap]。
  */
 object BackfillRules {
 
@@ -18,6 +20,18 @@ object BackfillRules {
     const val MAX_MINUTES = 480
     /** 任务无历史时的默认时长 */
     const val DEFAULT_MINUTES = 30
+    /** 无历史时兜底的结束小时 */
+    const val FALLBACK_END_HOUR = 21
+    /** 有效样本少于这个条数时不用"众数"，改用最近一条记录 */
+    const val MIN_SAMPLES_FOR_MODE = 3
+    /** 高频分钟的量化粒度：补一整段不需要分钟级精度 */
+    const val MINUTE_GRAIN = 15
+    /** 自动避让最多往后挪多少分钟（护栏，防止把时段默默挪到凌晨） */
+    const val MAX_AVOID_SHIFT_MINUTES = 120
+    /** 自动避让落位后对齐到几分钟 */
+    private const val AVOID_STEP_MINUTES = 5
+    /** 自动避让最多迭代几轮（理论上 1 轮就够） */
+    private const val MAX_AVOID_STEPS = 4
 
     /** 一次补录/编辑算出的时间区间（半开区间：[start, end)） */
     data class Span(val startMillis: Long, val endMillis: Long) {
@@ -86,37 +100,94 @@ object BackfillRules {
     }
 
     /**
-     * 弹层初始值：猜任务的历史习惯。
-     * - 结束时刻取该任务**最常出现的结束小时**（分钟固定 00；同频时取较晚的小时）；
-     * - 时长取**最常出现的时长**（同频时取较长的）；
-     * - 猜出的结束时刻若晚于此刻，日期退到昨天（保留"习惯"信息，又不会落在未来）；
-     * - 该任务没有任何记录时，回退「现在 + 30 分钟」。
+     * 撞上已有记录时往后**自动避让**：接在所有重叠记录之后。
+     * 返回 null 表示**放弃挪动**——调用方应保持原值并显示重叠警告。
+     *
+     * 护栏（2026-10-09 定）：挪动不超过 [MAX_AVOID_SHIFT_MINUTES]，
+     * 且结束时刻不跨出当天。静默把时段挪到凌晨比弹个警告更糟。
+     *
+     * 只用于**猜出来的初始值**：用户手动拨过滚轮之后不应再自动挪，否则值会在手指下自己跳。
      */
-    fun defaultsFor(
+    fun avoidOverlap(
+        span: Span,
         records: List<FocusRecord>,
         taskId: String?,
-        nowMillis: Long,
         zone: ZoneId,
-    ): Defaults {
-        val now = Instant.ofEpochMilli(nowMillis).atZone(zone)
+    ): Span? {
+        val minutes = span.minutes
+        if (minutes < MIN_MINUTES) return null
+        val endDay = Instant.ofEpochMilli(span.endMillis).atZone(zone).toLocalDate()
+        var candidate = span
+        repeat(MAX_AVOID_STEPS) {
+            val hits = overlapping(records, taskId, candidate)
+            if (hits.isEmpty()) return candidate
+            // 要不重叠，新起点必须 ≥ 所有重叠记录的结束时刻；
+            // 新起点 = 新结束 − 时长，所以新结束 = 最大结束 + 时长（半开区间，首尾相接不算重叠）
+            val nextEnd = hits.maxOf { it.endEpochMillis } + minutes * 60_000L
+            val landed = ceilToStep(nextEnd)
+            if (landed <= candidate.endMillis) return null
+            if (landed - span.endMillis > MAX_AVOID_SHIFT_MINUTES * 60_000L) return null
+            if (Instant.ofEpochMilli(landed).atZone(zone).toLocalDate() != endDay) return null
+            candidate = Span(landed - minutes * 60_000L, landed)
+        }
+        return null
+    }
+
+    /**
+     * 弹层初始值。主场景是「补昨天/前天忘掉的那一整段」，所以：
+     *
+     * - **日期固定昨天**——原来按"高频小时是否晚于此刻"在 今天/昨天 之间飘，
+     *   同一个任务一天里不同时刻打开会给出不同日期，用户没法形成预期；
+     * - 结束时刻 = 该任务高频**结束小时** + 该小时内众数分钟（量化到 [MINUTE_GRAIN]）；
+     * - 时长**优先取补录记录**（MANUAL）的众数——真实计时多是 25/45 分钟，
+     *   拿它们猜"补一整段"会永远猜偏（2–4 小时）；
+     * - 有效样本少于 [MIN_SAMPLES_FOR_MODE] 条时不用众数，改用**最近一条记录**；
+     * - 该任务一条记录都没有时回退 昨天 + 21:00 + 30 分钟。
+     */
+    fun defaultsFor(records: List<FocusRecord>, taskId: String?, zone: ZoneId): Defaults {
         val mine = records.filter { it.taskId == taskId }
         if (mine.isEmpty()) {
-            return Defaults(daysAgo = 0, endHour = now.hour, endMinute = now.minute, durationMinutes = DEFAULT_MINUTES)
+            return Defaults(
+                daysAgo = 1,
+                endHour = FALLBACK_END_HOUR,
+                endMinute = 0,
+                durationMinutes = DEFAULT_MINUTES,
+            )
         }
+        if (mine.size < MIN_SAMPLES_FOR_MODE) {
+            val latest = mine.maxBy { it.endEpochMillis }
+            val end = Instant.ofEpochMilli(latest.endEpochMillis).atZone(zone)
+            return Defaults(
+                daysAgo = 1,
+                endHour = end.hour,
+                endMinute = quantizeMinute(end.minute),
+                durationMinutes = latest.minutes.coerceIn(MIN_MINUTES, MAX_MINUTES),
+            )
+        }
+        // 同频时取较晚的小时 / 较晚的分钟 / 较长的时长
         val endHour = mine
             .groupingBy { Instant.ofEpochMilli(it.endEpochMillis).atZone(zone).hour }
             .eachCount()
             .entries
-            .maxWithOrNull(compareBy({ it.value }, { it.key }))
-            ?.key ?: now.hour
+            .maxWith(compareBy({ it.value }, { it.key }))
+            .key
+        val endMinute = mine
+            .filter { Instant.ofEpochMilli(it.endEpochMillis).atZone(zone).hour == endHour }
+            .groupingBy { quantizeMinute(Instant.ofEpochMilli(it.endEpochMillis).atZone(zone).minute) }
+            .eachCount()
+            .entries
+            .maxWith(compareBy({ it.value }, { it.key }))
+            .key
         val duration = mine
+            .filter { it.recordSource == RecordSource.MANUAL }
+            .ifEmpty { mine }
             .groupingBy { it.minutes }
             .eachCount()
             .entries
-            .maxWithOrNull(compareBy({ it.value }, { it.key }))
-            ?.key?.coerceIn(MIN_MINUTES, MAX_MINUTES) ?: DEFAULT_MINUTES
-        val daysAgo = if (endHour * 60 > now.hour * 60 + now.minute) 1 else 0
-        return Defaults(daysAgo = daysAgo, endHour = endHour, endMinute = 0, durationMinutes = duration)
+            .maxWith(compareBy({ it.value }, { it.key }))
+            .key
+            .coerceIn(MIN_MINUTES, MAX_MINUTES)
+        return Defaults(daysAgo = 1, endHour = endHour, endMinute = endMinute, durationMinutes = duration)
     }
 
     /** 只有手动补录的记录允许改时长；真实计时的时长是客观发生的，不给改 */
@@ -146,4 +217,14 @@ object BackfillRules {
 
     /** 抹掉秒与毫秒（epoch 毫秒对 60000 取模即分钟对齐，时区偏移都是整分钟） */
     private fun floorToMinute(millis: Long): Long = millis - millis.mod(60_000L)
+
+    /** 分钟向下量化到 [MINUTE_GRAIN] 的整数倍（0 / 15 / 30 / 45） */
+    private fun quantizeMinute(minute: Int): Int = (minute / MINUTE_GRAIN) * MINUTE_GRAIN
+
+    /** 向上对齐到 [AVOID_STEP_MINUTES] 的整数倍；已在边界上则不动 */
+    private fun ceilToStep(millis: Long): Long {
+        val step = AVOID_STEP_MINUTES * 60_000L
+        val rem = millis.mod(step)
+        return if (rem == 0L) millis else millis + (step - rem)
+    }
 }

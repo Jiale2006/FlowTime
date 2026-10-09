@@ -51,8 +51,9 @@ interface FlowTimeDao {
     @Query("DELETE FROM tasks")
     suspend fun deleteAllTasks()
 
+    /** 插一条记录，返回新 rowid（补录要用它做撤销） */
     @Insert
-    suspend fun insertRecord(record: FocusRecord)
+    suspend fun insertRecord(record: FocusRecord): Long
 
     @Insert
     suspend fun insertRecords(records: List<FocusRecord>)

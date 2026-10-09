@@ -65,6 +65,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.flowtime.data.FocusRecord
 import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.components.AmbientParticles
 import com.example.flowtime.ui.components.CategoryBadge
@@ -74,7 +75,9 @@ import com.example.flowtime.ui.components.RingTimer
 import com.example.flowtime.ui.components.pressScale
 import com.example.flowtime.ui.components.rememberAmbientParticlesState
 import com.example.flowtime.ui.components.rememberReducedMotion
+import com.example.flowtime.ui.components.formatMinutesHm
 import com.example.flowtime.ui.records.BackfillDialog
+import com.example.flowtime.ui.records.RecordUndoBar
 import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.AccentGreen
 import com.example.flowtime.ui.theme.BorderColor
@@ -126,6 +129,8 @@ fun TimerScreen(
         .dp.coerceIn(180.dp, 320.dp)
     var showTaskPicker by remember { mutableStateOf(false) }
     var showBackfill by remember { mutableStateOf(false) }
+    // 刚补录进来的记录：底部弹撤销条，写错了能一键反悔
+    var addedRecord by remember { mutableStateOf<FocusRecord?>(null) }
     var showCancelConfirm by remember { mutableStateOf(false) }
     var showDurationPicker by remember { mutableStateOf(false) }
     // 时长弹层里的临时值：每次打开都从当前选中时长起步，确定后才写回
@@ -496,6 +501,18 @@ fun TimerScreen(
             }
             Spacer(Modifier.height(Dimens.ListBottomGap))
         }
+
+        // 补录撤销条：贴在底栏上方（补错了不用跑去记录页删）
+        RecordUndoBar(
+            visible = addedRecord != null,
+            message = "已补录 ${formatMinutesHm(addedRecord?.minutes ?: 0)}",
+            onUndo = {
+                addedRecord?.let { viewModel.deleteRecord(it.id) }
+                addedRecord = null
+            },
+            onExpire = { addedRecord = null },
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
+        )
     }
 
     if (showCancelConfirm) {
@@ -765,12 +782,14 @@ fun TimerScreen(
 
     if (showBackfill) {
         BackfillDialog(
-            taskId = task?.id,
-            taskName = task?.name,
+            tasks = tasks,
+            initialTaskId = task?.id,
             records = records,
             onDismiss = { showBackfill = false },
-            onConfirm = { startMillis, endMillis ->
-                viewModel.addManualRecord(task, startMillis, endMillis)
+            onConfirm = { picked, startMillis, endMillis ->
+                viewModel.addManualRecord(picked, startMillis, endMillis) { added ->
+                    addedRecord = added
+                }
                 showBackfill = false
             },
         )

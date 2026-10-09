@@ -172,16 +172,17 @@ fun RecordDivider() {
 }
 
 /**
- * 删除后的撤销条：贴在屏幕底部，[seconds] 秒内可反悔。
+ * 删除 / 补录后的撤销条：贴在屏幕底部，[seconds] 秒内可反悔。
  * 超时自动消失（调用方通过 [onExpire] 清理状态）。
  */
 @Composable
 fun RecordUndoBar(
     visible: Boolean,
-    seconds: Int = 6,
     onUndo: () -> Unit,
     onExpire: () -> Unit,
     modifier: Modifier = Modifier,
+    message: String = "记录已删除",
+    seconds: Int = 6,
 ) {
     LaunchedEffect(visible) {
         if (visible) {
@@ -204,7 +205,7 @@ fun RecordUndoBar(
                 .padding(horizontal = 16.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("记录已删除", fontSize = 13.sp, color = Color.White, modifier = Modifier.weight(1f))
+            Text(message, fontSize = 13.sp, color = Color.White, modifier = Modifier.weight(1f))
             TextButton(onClick = onUndo) {
                 Text("撤销", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = CardGreenLight)
             }
