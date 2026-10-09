@@ -1,13 +1,10 @@
 package com.example.flowtime
 
 import android.Manifest
-import android.app.Activity
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -115,7 +112,6 @@ private object Routes {
     const val SETTINGS = "settings"
     const val COMPLETION = "completion"
     const val TASK_DETAIL = "taskDetail"
-    const val CATEGORY_DETAIL = "categoryDetail"
     const val ALL_RECORDS = "allRecords"
 }
 
@@ -149,19 +145,15 @@ fun FlowTimeApp(viewModel: AppViewModel = viewModel()) {
         }
     }
 
-    // 专注中按返回：计时不中断，只是退到后台 —— 但要说一句，
-    // 否则界面直接消失，用户会以为计时被中断了。
-    BackHandler(enabled = timer.phase != AppViewModel.TimerPhase.IDLE) {
-        Toast.makeText(context, "计时继续在后台运行", Toast.LENGTH_SHORT).show()
-        (context as? Activity)?.moveTaskToBack(true)
-    }
-
+    // 专注中不再拦截返回键：
+    // 原来的全局 BackHandler 会把返回一律变成「退到后台」，导致专注期间 App 内任何页面都退不出去，
+    // 而且它盖过了详情页自己的返回逻辑。现在交给各页面正常处理——计时本身由前台服务保活，
+    // 返回不影响；要控制计时用通知栏的暂停/停止。
     Scaffold(
         containerColor = BgPrimary,
         bottomBar = {
             if (currentRoute != Routes.COMPLETION &&
                 currentRoute?.startsWith(Routes.TASK_DETAIL) != true &&
-                currentRoute?.startsWith(Routes.CATEGORY_DETAIL) != true &&
                 currentRoute != Routes.ALL_RECORDS
             ) {
                 Column {
@@ -266,8 +258,13 @@ fun FlowTimeApp(viewModel: AppViewModel = viewModel()) {
                             restoreState = true
                         }
                     },
+                    // 父/子任务互跳一律「替换当前页」：只保留一层详情栈。
+                    // 不加的话 A→B→A→B 会无限压栈，返回要按很多次才出得来。
                     onOpenTask = { parentTaskId ->
-                        navController.navigate("${Routes.TASK_DETAIL}/$parentTaskId")
+                        navController.navigate("${Routes.TASK_DETAIL}/$parentTaskId") {
+                            popUpTo("${Routes.TASK_DETAIL}/{taskId}") { inclusive = true }
+                            launchSingleTop = true
+                        }
                     },
                     onOpenAllRecords = { navController.navigate(Routes.ALL_RECORDS) },
                 )
