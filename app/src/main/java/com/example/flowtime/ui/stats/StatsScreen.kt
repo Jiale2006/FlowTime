@@ -64,8 +64,9 @@ import com.example.flowtime.ui.components.MonthHeatmapPager
 import com.example.flowtime.ui.components.ProCard
 import com.example.flowtime.ui.components.WeeklyBarsPager
 import com.example.flowtime.ui.components.formatMinutesHm
+import com.example.flowtime.ui.components.OvershootEasing
 import com.example.flowtime.ui.components.rememberCountUp
-import com.example.flowtime.ui.components.rememberSpringProgress
+import com.example.flowtime.ui.components.rememberCountUpFloat
 import com.example.flowtime.ui.components.pressScale
 import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.AccentGreen
@@ -499,9 +500,14 @@ private fun GoalCard(
 ) {
     val progress = if (goalMinutes <= 0) 0f else (todayMinutes.toFloat() / goalMinutes).coerceIn(0f, 1f)
     // 今日目标只动进度条：数字保持静态（滚动会让"还差多少"跟着跳，读着累）。
-    // 进度条用弹性 spring（轻微冲过头再稳住）；animateFloatAsState(真实值) 的
-    // 首帧起点就是终值，那种写法等于没动。
-    val animatedProgress = rememberSpringProgress(progress, delayMillis = DelayTop + CountLag)
+    // 进度条与上方数字滚动**同节奏**：同为 800ms + 同一延迟，缓动换成带过冲的
+    // OvershootEasing（先冲过头一点再回落）——用户要求"和数字增加的时长一样"。
+    val animatedProgress = rememberCountUpFloat(
+        value = progress,
+        durationMillis = 800,
+        delayMillis = DelayTop + CountLag,
+        easing = OvershootEasing,
+    )
     val done = goalMinutes > 0 && todayMinutes >= goalMinutes
     ProCard(modifier = modifier.fillMaxWidth()) {
         Column(Modifier.padding(Dimens.CardPadding)) {
