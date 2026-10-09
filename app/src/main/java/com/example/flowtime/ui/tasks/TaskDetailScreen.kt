@@ -52,7 +52,6 @@ import com.example.flowtime.ui.components.ProCard
 import com.example.flowtime.ui.components.WeeklyBarsPager
 import com.example.flowtime.ui.components.formatMinutesHm
 import com.example.flowtime.ui.components.pressScale
-import com.example.flowtime.ui.records.BackfillDialog
 import com.example.flowtime.ui.records.DurationEditDialog
 import com.example.flowtime.ui.records.RecordDivider
 import com.example.flowtime.ui.records.RecordRow
@@ -85,6 +84,7 @@ fun TaskDetailScreen(
     onStartFocus: () -> Unit,
     onOpenTask: (String) -> Unit = {},
     onOpenAllRecords: () -> Unit = {},
+    onOpenBackfill: () -> Unit = {},
 ) {
     val tasks by viewModel.tasks.collectAsState()
     val records by viewModel.records.collectAsState()
@@ -103,12 +103,12 @@ fun TaskDetailScreen(
     val childMinutes = remember(records, children) {
         children.associate { child -> child.name to RecordLink.minutesOf(child, records) }
     }
-    var showBackfill by remember { mutableStateOf(false) }
     var showEditor by remember { mutableStateOf(false) }
-    // 正在改时长的记录（仅手动补录） / 刚被删掉、刚补录进来，还在撤销窗口里的记录
+    // 正在改时长的记录（仅手动补录） / 刚被删掉的记录
     var editingRecord by remember { mutableStateOf<FocusRecord?>(null) }
     var deletedRecord by remember { mutableStateOf<FocusRecord?>(null) }
-    var addedRecord by remember { mutableStateOf<FocusRecord?>(null) }
+    // 刚补录进来、还在撤销窗口里的记录（状态在 ViewModel，补录页返回后这里才读得到）
+    val lastAdded = viewModel.lastAddedRecord.collectAsState().value
     val (cardColor, cardFg) = TaskCardPalette[(task?.colorIndex ?: 0) % TaskCardPalette.size]
 
     Box(
@@ -352,7 +352,7 @@ fun TaskDetailScreen(
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 OutlinedButton(
-                    onClick = { showBackfill = true },
+                    onClick = { onOpenBackfill() },
                     enabled = task != null,
                     modifier = Modifier.weight(1f).height(Dimens.ButtonHeightHero).pressScale(),
                     shape = RoundedCornerShape(16.dp),
@@ -380,37 +380,22 @@ fun TaskDetailScreen(
 
         // 撤销条：删除与补录共用（补录写错了不用再去"全部记录"里长按删）
         RecordUndoBar(
-            visible = deletedRecord != null || addedRecord != null,
+            visible = deletedRecord != null || lastAdded != null,
             message = when {
-                addedRecord != null -> "已补录 ${formatMinutesHm(addedRecord!!.minutes)}"
+                lastAdded != null -> "已补录 ${formatMinutesHm(lastAdded.minutes)}"
                 else -> "记录已删除"
             },
             onUndo = {
                 deletedRecord?.let { viewModel.restoreRecord(it) }
-                addedRecord?.let { viewModel.deleteRecord(it.id) }
+                lastAdded?.let { viewModel.deleteRecord(it.id) }
                 deletedRecord = null
-                addedRecord = null
+                viewModel.clearLastAddedRecord()
             },
             onExpire = {
                 deletedRecord = null
-                addedRecord = null
+                viewModel.clearLastAddedRecord()
             },
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 84.dp),
-        )
-    }
-
-    if (showBackfill) {
-        BackfillDialog(
-            tasks = tasks,
-            initialTaskId = task?.id,
-            records = records,
-            onDismiss = { showBackfill = false },
-            onConfirm = { picked, startMillis, endMillis ->
-                viewModel.addManualRecord(picked, startMillis, endMillis) { added ->
-                    addedRecord = added
-                }
-                showBackfill = false
-            },
         )
     }
 

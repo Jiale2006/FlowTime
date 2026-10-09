@@ -555,14 +555,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
      * （跨天溢出放行，不在这里再做钳制）；[task] 为 null 表示自由专注（未分类）。
      * 来源固定写 [RecordSource.MANUAL]——这是"只有它允许改时长"的依据。
      *
-     * [onAdded] 在主线程回调**入库后**的记录（带真实 id），调用方用它弹撤销条。
+     * 入库成功后写 [lastAddedRecord]：补录页提交后会立刻返回上一页，
+     * 撤销条是在**上一页**弹的，所以这个状态得跨页面活着（放 ViewModel，不放页面）。
      */
-    fun addManualRecord(
-        task: FocusTask?,
-        startEpochMillis: Long,
-        endEpochMillis: Long,
-        onAdded: (FocusRecord) -> Unit = {},
-    ) {
+    fun addManualRecord(task: FocusTask?, startEpochMillis: Long, endEpochMillis: Long) {
         if (endEpochMillis <= startEpochMillis) return
         val minutes = ((endEpochMillis - startEpochMillis) / 60_000L).toInt()
         if (minutes < 1) return
@@ -575,8 +571,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 endEpochMillis = endEpochMillis,
                 source = RecordSource.MANUAL.name,
             )
-            onAdded(record.copy(id = repo.addRecord(record)))
+            _lastAddedRecord.value = record.copy(id = repo.addRecord(record))
         }
+    }
+
+    /** 刚补录进来、还在撤销窗口里的记录（null = 没有） */
+    private val _lastAddedRecord = MutableStateFlow<FocusRecord?>(null)
+    val lastAddedRecord: StateFlow<FocusRecord?> = _lastAddedRecord.asStateFlow()
+
+    /** 撤销条消失 / 已撤销时清掉 */
+    fun clearLastAddedRecord() {
+        _lastAddedRecord.value = null
     }
 
     /** 删除一条记录（撤销时用 [restoreRecord] 原样插回） */

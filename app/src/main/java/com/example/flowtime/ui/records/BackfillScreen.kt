@@ -7,20 +7,25 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -33,9 +38,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.flowtime.data.BackfillRules
-import com.example.flowtime.data.FocusRecord
 import com.example.flowtime.data.FocusTask
-import com.example.flowtime.ui.components.BlurDialogBehind
+import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.components.DayQuickChip
 import com.example.flowtime.ui.components.DurationWheelBlock
 import com.example.flowtime.ui.components.HourMinuteWheel
@@ -48,7 +52,6 @@ import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.CardGreenLight
 import com.example.flowtime.ui.theme.Dimens
 import com.example.flowtime.ui.theme.DisabledGray
-import com.example.flowtime.ui.theme.PaperElevated
 import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.TextPrimary
 import com.example.flowtime.ui.theme.TextSecondary
@@ -57,7 +60,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
-/** 弹层开局用的初始值（已做过重叠避让） */
+/** 页面开局用的初始值（已做过重叠避让） */
 private data class Seed(
     val daysAgo: Int,
     val endHour: Int,
@@ -69,29 +72,29 @@ private data class Seed(
 private const val FREE_FOCUS_LABEL = "未分类（自由专注）"
 
 /**
- * 补录时间（一步式底部弹层）——任务详情页和首页共用。
+ * 补录时间（**独立页面**）。
+ *
+ * 2026-10-09 复盘：原来做成底部弹层是错的——内容有「日期 + 两个滚轮 + 预览」近 750dp，
+ * 塞进弹层就得滚，而弹层还自带"从底部上浮 + 下拖关闭 + 点遮罩关闭"这些属于快捷面板的语义。
+ * 补录是个**编辑动作**，该有自己的页面：直接出现（路由过渡本就是 None）、左上角返回、
+ * 底部固定主按钮。
  *
  * 口径：**结束时刻是锚点**，日期 chip 选的是「结束日」，开始时刻 = 结束 − 时长。
  * 跨天溢出放行：开始时刻落到前一天不钳制、不警告。
  * 选「今天」时结束时刻不能拨到未来（滚轮上限 = 此刻，超出则结束钉在此刻、时长不变）。
  *
- * 2026-10-09 补录交互定稿：
- * - 主场景是「补昨天/前天忘掉的那一整段」→ 初始值固定落在**昨天**（见 [BackfillRules.defaultsFor]）；
- * - 初始值撞上已有记录时**静默往后挪**，挪不动（超护栏）才退回显示警告（见 [BackfillRules.avoidOverlap]）；
- * - **主按钮固定在弹层底部**，内容区独立滚动——原来按钮跟着 750dp 的内容走，小屏要滚到底才够得到；
- * - 「记到「X」」**可点击换任务**（含未分类）：原来首页补录只能补"当前已选任务"，想给别的任务补
- *   得先选中它（弹层会被关掉）再重新打开；
- * - 时长只留滚轮，不再挂快选 chip。
+ * 主场景是「补昨天/前天忘掉的那一整段」→ 初始值固定落在**昨天**（见 [BackfillRules.defaultsFor]）；
+ * 初始值撞上已有记录时**静默往后挪**，挪不动（超护栏）才退回显示警告（见 [BackfillRules.avoidOverlap]）。
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BackfillDialog(
-    tasks: List<FocusTask>,
+fun BackfillScreen(
+    viewModel: AppViewModel,
     initialTaskId: String?,
-    records: List<FocusRecord>,
-    onDismiss: () -> Unit,
-    onConfirm: (task: FocusTask?, startMillis: Long, endMillis: Long) -> Unit,
+    onBack: () -> Unit,
 ) {
+    val tasks by viewModel.tasks.collectAsState()
+    val records by viewModel.records.collectAsState()
+
     val zone = remember { ZoneId.systemDefault() }
     val today = remember { LocalDate.now(zone) }
     val nowMillis = remember { System.currentTimeMillis() }
@@ -142,26 +145,30 @@ fun BackfillDialog(
         formatMinutesHm(span.minutes),
     )
 
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        // 弹层自己不再吃手势：否则拨滚轮的竖向拖拽会被整层抢走（倒计时弹层踩过同一个坑）
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        sheetGesturesEnabled = false,
-        dragHandle = null,
-        containerColor = PaperElevated,
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter,
     ) {
-        BlurDialogBehind(26.dp)
-        Column(Modifier.fillMaxWidth()) {
-            // 内容区：独立滚动，按钮不跟着跑
+        Column(modifier = Modifier.widthIn(max = 560.dp).fillMaxSize()) {
             Column(
-                Modifier
-                    .weight(1f, fill = false)
+                modifier = Modifier
+                    .weight(1f)
                     .verticalScroll(rememberScrollState())
-                    .padding(top = 24.dp)
                     .padding(horizontal = Dimens.ScreenPadding),
             ) {
-                Text("补录时间", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "返回",
+                            tint = TextPrimary,
+                        )
+                    }
+                    Text("补录时间", style = MaterialTheme.typography.titleLarge, color = TextPrimary)
+                }
+
+                Spacer(Modifier.height(6.dp))
 
                 // 「记到「X」」可点击 → 就地展开任务列表，补录时能改归属
                 Row(
@@ -169,18 +176,18 @@ fun BackfillDialog(
                         .fillMaxWidth()
                         .clip(ActivePalette.buttonShape)
                         .clickable { showTaskPicker = !showTaskPicker }
-                        .padding(vertical = 6.dp),
+                        .padding(vertical = 8.dp, horizontal = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         "记到「${pickedTask?.name ?: FREE_FOCUS_LABEL}」",
-                        fontSize = 12.sp,
+                        fontSize = 13.sp,
                         color = TextSecondary,
                         modifier = Modifier.weight(1f),
                     )
                     Text(
                         if (showTaskPicker) "收起" else "更换",
-                        fontSize = 12.sp,
+                        fontSize = 13.sp,
                         color = Primary,
                     )
                 }
@@ -232,9 +239,9 @@ fun BackfillDialog(
                     )
                 }
 
-                // 「更多」就地展开日期滚轮，不再套一层弹窗
+                // 「更多」就地展开日期滚轮
                 if (showDateWheel) {
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(10.dp))
                     Box(
                         Modifier.fillMaxWidth().height(WheelHeight),
                         contentAlignment = Alignment.Center,
@@ -245,12 +252,11 @@ fun BackfillDialog(
                             onDaysAgoChange = { daysAgo = it },
                             today = today,
                             modifier = Modifier.width(130.dp),
-                            fadeColor = PaperElevated,
                         )
                     }
                 }
 
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(16.dp))
                 Text("结束时间", fontSize = 13.sp, color = TextSecondary)
                 Spacer(Modifier.height(4.dp))
                 HourMinuteWheel(
@@ -263,26 +269,24 @@ fun BackfillDialog(
                     // 今天只能到此刻；其它日期 00:00-23:59 全开放
                     maxTotalMinutes = capMinutes,
                     columnWidth = 62.dp,
-                    fadeColor = PaperElevated,
                 )
                 if (daysAgo == 0) {
                     Spacer(Modifier.height(4.dp))
                     Text("今天不能补还没发生的时间", fontSize = 11.sp, color = TextSecondary)
                 }
 
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(16.dp))
                 Text("时长", fontSize = 13.sp, color = TextSecondary)
                 Spacer(Modifier.height(4.dp))
                 DurationWheelBlock(
                     minutes = duration,
                     onChange = { duration = it.coerceIn(0, BackfillRules.MAX_MINUTES) },
                     maxTotalMinutes = BackfillRules.MAX_MINUTES,
-                    fadeColor = PaperElevated,
                 )
 
                 Spacer(Modifier.height(10.dp))
                 Text(preview, fontSize = 12.sp, color = TextSecondary)
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(12.dp))
             }
 
             // 固定区：警告 + 主按钮，不跟着内容滚
@@ -308,16 +312,21 @@ fun BackfillDialog(
                     Spacer(Modifier.height(8.dp))
                 }
                 Button(
-                    onClick = { onConfirm(pickedTask, span.startMillis, span.endMillis) },
+                    onClick = {
+                        viewModel.addManualRecord(pickedTask, span.startMillis, span.endMillis)
+                        // 撤销条由上一页弹（状态在 ViewModel 里），这里直接退回去
+                        onBack()
+                    },
                     enabled = valid,
-                    modifier = Modifier.fillMaxWidth().height(Dimens.ButtonHeight),
+                    modifier = Modifier.fillMaxWidth().height(Dimens.ButtonHeightHero),
                     shape = ActivePalette.buttonShape,
                     colors = ButtonDefaults.buttonColors(containerColor = Primary),
                 ) {
                     Text(
                         "补录",
-                        fontSize = 15.sp,
+                        fontSize = 16.sp,
                         color = if (valid) Color.White else DisabledGray,
+                        fontWeight = FontWeight.Medium,
                     )
                 }
             }
@@ -343,7 +352,7 @@ private fun TaskPickRow(
     ) {
         Text(
             label,
-            fontSize = 14.sp,
+            fontSize = 15.sp,
             color = if (selected) Primary else TextPrimary,
             fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
             modifier = Modifier.weight(1f),

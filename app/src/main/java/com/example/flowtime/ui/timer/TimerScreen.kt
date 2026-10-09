@@ -65,7 +65,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.flowtime.data.FocusRecord
 import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.components.AmbientParticles
 import com.example.flowtime.ui.components.CategoryBadge
@@ -76,7 +75,6 @@ import com.example.flowtime.ui.components.pressScale
 import com.example.flowtime.ui.components.rememberAmbientParticlesState
 import com.example.flowtime.ui.components.rememberReducedMotion
 import com.example.flowtime.ui.components.formatMinutesHm
-import com.example.flowtime.ui.records.BackfillDialog
 import com.example.flowtime.ui.records.RecordUndoBar
 import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.AccentGreen
@@ -107,6 +105,7 @@ fun TimerScreen(
     viewModel: AppViewModel,
     onNavigateToTasks: () -> Unit,
     onCompleted: () -> Unit,
+    onOpenBackfill: (String?) -> Unit = {},
 ) {
     val timer by viewModel.timer.collectAsState()
     val tasks by viewModel.tasks.collectAsState()
@@ -114,7 +113,6 @@ fun TimerScreen(
     val selectedDuration by viewModel.selectedDurationMinutes.collectAsState()
     val categories by viewModel.categories.collectAsState()
     val settings by viewModel.settings.collectAsState()
-    val records by viewModel.records.collectAsState()
     val task = tasks.firstOrNull { it.id == timer.selectedTaskId }
     val isIdle = timer.phase == AppViewModel.TimerPhase.IDLE
     val reducedMotion = rememberReducedMotion()
@@ -128,9 +126,8 @@ fun TimerScreen(
     val ringMaxSize = minOf(screenHeightDp * 0.33f, screenWidthDp * 0.80f)
         .dp.coerceIn(180.dp, 320.dp)
     var showTaskPicker by remember { mutableStateOf(false) }
-    var showBackfill by remember { mutableStateOf(false) }
-    // 刚补录进来的记录：底部弹撤销条，写错了能一键反悔
-    var addedRecord by remember { mutableStateOf<FocusRecord?>(null) }
+    // 撤销条读 ViewModel：补录页提交后立刻返回，状态得跨页面活着
+    val lastAdded = viewModel.lastAddedRecord.collectAsState().value
     var showCancelConfirm by remember { mutableStateOf(false) }
     var showDurationPicker by remember { mutableStateOf(false) }
     // 时长弹层里的临时值：每次打开都从当前选中时长起步，确定后才写回
@@ -504,13 +501,13 @@ fun TimerScreen(
 
         // 补录撤销条：贴在底栏上方（补错了不用跑去记录页删）
         RecordUndoBar(
-            visible = addedRecord != null,
-            message = "已补录 ${formatMinutesHm(addedRecord?.minutes ?: 0)}",
+            visible = lastAdded != null,
+            message = "已补录 ${formatMinutesHm(lastAdded?.minutes ?: 0)}",
             onUndo = {
-                addedRecord?.let { viewModel.deleteRecord(it.id) }
-                addedRecord = null
+                lastAdded?.let { viewModel.deleteRecord(it.id) }
+                viewModel.clearLastAddedRecord()
             },
-            onExpire = { addedRecord = null },
+            onExpire = { viewModel.clearLastAddedRecord() },
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp),
         )
     }
@@ -760,7 +757,7 @@ fun TimerScreen(
                     // 首页补录入口：沿用当前选中的任务（自由专注也能补，记到未分类）
                     TextButton(onClick = {
                         showTaskPicker = false
-                        showBackfill = true
+                        onOpenBackfill(task?.id)
                     }) {
                         Text("补录时间", color = Primary)
                     }
@@ -778,21 +775,6 @@ fun TimerScreen(
                 }
             }
         }
-    }
-
-    if (showBackfill) {
-        BackfillDialog(
-            tasks = tasks,
-            initialTaskId = task?.id,
-            records = records,
-            onDismiss = { showBackfill = false },
-            onConfirm = { picked, startMillis, endMillis ->
-                viewModel.addManualRecord(picked, startMillis, endMillis) { added ->
-                    addedRecord = added
-                }
-                showBackfill = false
-            },
-        )
     }
 }
 
