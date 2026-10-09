@@ -3,6 +3,7 @@ package com.example.flowtime.ui.components
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -11,6 +12,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 
 /**
  * 数字滚动：进入页面时从 0 数到 [value]；[value] 变化时（切范围 / 新记录）平滑改到新值。
@@ -59,6 +61,38 @@ fun rememberCountUpFloat(
         targetValue = target,
         animationSpec = tween(durationMillis, delayMillis = delayMillis, easing = FastOutSlowInEasing),
         label = "countUpFloat",
+    )
+    return animated
+}
+
+/**
+ * 弹性版进度（0..1 的比例）：从 0 **弹**到 [value]，轻微冲过头再稳住（rubber-band 手感）。
+ *
+ * - 先让目标停在 0 再改真实值：与上面两个函数同理，否则首帧就是终值、没有动画
+ * - spring 规格没有 delay 参数，所以 [delayMillis] 用协程 delay 实现
+ * - 默认参数：dampingRatio 0.65 = 轻微过冲（"slight overshoot"），
+ *   stiffness 1000 ≈ 半秒内收稳；想更弹就调低 damping，想更快就调高 stiffness
+ *
+ * ⚠️ 返回值可能**超过 1**（overshoot）——喂给 `fillMaxWidth(fraction)` 之前必须
+ * `coerceIn(0f, 1f)`，否则 fraction 越界直接崩。要不要钳制、钳在哪，由调用方决定：
+ * 钳在 1.0 的话"已达成"的进度条就没有回弹（视觉上无所谓，反正已经满了）。
+ */
+@Composable
+fun rememberSpringProgress(
+    value: Float,
+    delayMillis: Int = 0,
+    dampingRatio: Float = 0.65f,
+    stiffness: Float = 1000f,
+): Float {
+    var target by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(value) {
+        if (delayMillis > 0) delay(delayMillis.toLong())
+        target = value
+    }
+    val animated by animateFloatAsState(
+        targetValue = target,
+        animationSpec = spring(dampingRatio = dampingRatio, stiffness = stiffness),
+        label = "springProgress",
     )
     return animated
 }
