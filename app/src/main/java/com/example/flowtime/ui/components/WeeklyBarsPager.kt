@@ -53,8 +53,6 @@ fun WeeklyBarsPager(
     if (pages.isEmpty()) return
     val pagerState = rememberPagerState(pageCount = { pages.size })
     val current = pages.getOrNull(pagerState.currentPage) ?: pages.first()
-    // 合计也滚动：翻页换周时数字自己数到新值，比直接跳字更容易看出"换了一周"
-    val animatedTotal = rememberCountUp(current.totalMinutes, delayMillis = countDelayMillis)
 
     Column(modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -66,7 +64,7 @@ fun WeeklyBarsPager(
                 modifier = Modifier.weight(1f),
             )
             Text(
-                text = "合计 ${formatMinutesHm(animatedTotal)} · ${pagerState.currentPage + 1}/${pages.size}",
+                text = "合计 ${formatMinutesHm(current.totalMinutes)} · ${pagerState.currentPage + 1}/${pages.size}",
                 fontSize = 12.sp,
                 color = TextSecondary,
             )
@@ -87,7 +85,10 @@ fun WeeklyBarsPager(
     }
 }
 
-/** 单周 7 天柱状图（分页/统计页复用）：柱形从 0 长起来，柱顶数字同步从 0 数上去 */
+/**
+ * 单周 7 天柱状图（分页/统计页复用）。只让柱子从 0 长起来，柱顶数字保持静态
+ * （用户明确要求：趋势卡的数字不动）。
+ */
 @Composable
 fun WeeklyBarRow(
     days: List<AppViewModel.DayMinutes>,
@@ -111,17 +112,12 @@ fun WeeklyBarRow(
                 animationSpec = tween(520, delayMillis = countDelayMillis + 80 + index * 22, easing = FastOutSlowInEasing),
                 label = "weekBarGrow$index",
             )
-            val countUp = rememberCountUp(
-                value = day.minutes,
-                durationMillis = 520,
-                delayMillis = countDelayMillis + index * 22,
-            )
             Column(
                 modifier = Modifier.weight(1f),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
-                    text = if (day.minutes > 0) "$countUp" else "",
+                    text = if (day.minutes > 0) "${day.minutes}" else "",
                     fontSize = 10.sp,
                     color = TextSecondary,
                 )
@@ -185,17 +181,12 @@ fun DailyBarsStrip(
                 animationSpec = tween(520, delayMillis = countDelayMillis + 80 + index * 22, easing = FastOutSlowInEasing),
                 label = "dayGrow$index",
             )
-            val countUp = rememberCountUp(
-                value = day.minutes,
-                durationMillis = 520,
-                delayMillis = countDelayMillis + index * 22,
-            )
             Column(
                 modifier = if (scrollable) Modifier.width(26.dp) else Modifier.weight(1f),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
-                    text = if (day.minutes > 0) "$countUp" else "",
+                    text = if (day.minutes > 0) "${day.minutes}" else "",
                     fontSize = 10.sp,
                     color = TextSecondary,
                     maxLines = 1,

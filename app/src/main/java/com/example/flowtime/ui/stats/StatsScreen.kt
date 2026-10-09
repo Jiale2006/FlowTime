@@ -297,13 +297,9 @@ fun StatsScreen(viewModel: AppViewModel) {
                             )
                             peakHourRange(rangeStats.hourMinutes)?.let { peakRange ->
                                 Text(
-                                    "最专注 $peakRange · " +
-                                        formatMinutesHm(
-                                            rememberCountUp(
-                                                rangeStats.hourMinutes.maxOrNull() ?: 0,
-                                                delayMillis = DelayHours + CountLag,
-                                            ),
-                                        ),
+                                    "最专注 $peakRange · ${
+                                        formatMinutesHm(rangeStats.hourMinutes.maxOrNull() ?: 0)
+                                    }",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = Primary,
@@ -501,17 +497,13 @@ private fun GoalCard(
     modifier: Modifier = Modifier,
 ) {
     val progress = if (goalMinutes <= 0) 0f else (todayMinutes.toFloat() / goalMinutes).coerceIn(0f, 1f)
-    // 数字从 0 数上去；进度条同步从 0 长出来（只听数字涨、条不动会显得脱节）
-    val animatedToday = rememberCountUp(todayMinutes, delayMillis = DelayTop + CountLag)
+    // 今日目标只动进度条：数字保持静态（滚动会让"还差多少"跟着跳，读着累）
     val animatedProgress by animateFloatAsState(
         targetValue = progress,
         animationSpec = tween(900, delayMillis = DelayTop + CountLag, easing = FastOutSlowInEasing),
         label = "goalProgress",
     )
-    // 完成态跟着**滚动值**判定：数字涨到目标那一刻文案和颜色一起翻，而不是开场就写"已完成"
-    val done = goalMinutes > 0 && animatedToday >= goalMinutes
-    val animatedStreak = rememberCountUp(bestStreakDays, delayMillis = DelayTop + CountLag)
-    val animatedHitDays = rememberCountUp(goalHitDaysInWeek, delayMillis = DelayTop + CountLag)
+    val done = goalMinutes > 0 && todayMinutes >= goalMinutes
     ProCard(modifier = modifier.fillMaxWidth()) {
         Column(Modifier.padding(Dimens.CardPadding)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -522,7 +514,7 @@ private fun GoalCard(
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    "${formatMinutesHm(animatedToday)} / ${formatMinutesHm(goalMinutes)}",
+                    "${formatMinutesHm(todayMinutes)} / ${formatMinutesHm(goalMinutes)}",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                     color = if (done) AccentGreen else Primary,
@@ -548,14 +540,14 @@ private fun GoalCard(
             }
             Spacer(Modifier.height(8.dp))
             Text(
-                if (done) "今天的目标已完成" else "还差 ${formatMinutesHm((goalMinutes - animatedToday).coerceAtLeast(0))}",
+                if (done) "今天的目标已完成" else "还差 ${formatMinutesHm((goalMinutes - todayMinutes).coerceAtLeast(0))}",
                 fontSize = 12.sp,
                 color = TextPlaceholder,
             )
             Spacer(Modifier.height(4.dp))
             Text(
                 // 「最近 7 天」是**滚动**窗口，不是本周——同屏有「本周/本月」档位，写"近 7 天"容易被读成本周
-                "最长连续 $animatedStreak 天 · 最近 7 天达成 $animatedHitDays/7",
+                "最长连续 $bestStreakDays 天 · 最近 7 天达成 $goalHitDaysInWeek/7",
                 fontSize = 12.sp,
                 color = TextPlaceholder,
             )
