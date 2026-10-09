@@ -25,7 +25,8 @@ private const val DEFAULT_DURATION_MINUTES = 45
 private const val LEGACY_DEFAULT_MINUTES = 25
 
 /** 备份文件格式版本：以后加字段靠它做兼容 */
-private const val BACKUP_SCHEMA = 1
+/** 备份文件格式版本：schema 2 起 records 多一个 source 字段（旧备份缺列时按 TIMER 处理） */
+private const val BACKUP_SCHEMA = 2
 
 /**
  * 本地持久化：
@@ -182,6 +183,16 @@ class FlowTimeRepository(private val context: Context) {
         dao.insertRecord(record)
     }
 
+    /** 改一条记录（手动补录改时长用；结束时刻保持不变由调用方算好） */
+    suspend fun updateRecord(record: FocusRecord) {
+        dao.updateRecord(record)
+    }
+
+    /** 删一条记录 */
+    suspend fun deleteRecord(id: Long) {
+        dao.deleteRecord(id)
+    }
+
     suspend fun updateSettings(settings: AppSettings) {
         context.flowTimeStore.edit { prefs ->
             prefs[Keys.NICKNAME] = settings.nickname
@@ -294,6 +305,8 @@ class FlowTimeRepository(private val context: Context) {
             // 旧数据没有开始时间：按结束时间往前推
             startEpochMillis = obj.optLong("startEpochMillis", end - minutes * 60_000L),
             endEpochMillis = end,
+            // schema 1 的旧备份没有 source 列，一律按真实计时处理（与 db 迁移口径一致）
+            source = RecordSource.of(obj.optString("source", null)).name,
         )
     }
 
@@ -306,7 +319,8 @@ class FlowTimeRepository(private val context: Context) {
                     .put("taskName", record.taskName)
                     .put("minutes", record.minutes)
                     .put("startEpochMillis", record.startEpochMillis)
-                    .put("endEpochMillis", record.endEpochMillis),
+                    .put("endEpochMillis", record.endEpochMillis)
+                    .put("source", record.source),
             )
         }
     }

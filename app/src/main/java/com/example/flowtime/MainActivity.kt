@@ -53,6 +53,7 @@ import androidx.navigation.compose.rememberNavController
 import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.completion.CompletionScreen
 import com.example.flowtime.ui.components.ThemeBackdrop
+import com.example.flowtime.ui.records.AllRecordsScreen
 import com.example.flowtime.ui.settings.SettingsScreen
 import com.example.flowtime.ui.stats.StatsScreen
 import com.example.flowtime.ui.tasks.TaskDetailScreen
@@ -115,6 +116,7 @@ private object Routes {
     const val COMPLETION = "completion"
     const val TASK_DETAIL = "taskDetail"
     const val CATEGORY_DETAIL = "categoryDetail"
+    const val ALL_RECORDS = "allRecords"
 }
 
 private data class TopLevelRoute(val route: String, val label: String, val icon: ImageVector)
@@ -159,7 +161,8 @@ fun FlowTimeApp(viewModel: AppViewModel = viewModel()) {
         bottomBar = {
             if (currentRoute != Routes.COMPLETION &&
                 currentRoute?.startsWith(Routes.TASK_DETAIL) != true &&
-                currentRoute?.startsWith(Routes.CATEGORY_DETAIL) != true
+                currentRoute?.startsWith(Routes.CATEGORY_DETAIL) != true &&
+                currentRoute != Routes.ALL_RECORDS
             ) {
                 Column {
                     // 玻璃导航条顶边的受光细线（水彩主题下是蓝灰分隔线）
@@ -266,6 +269,15 @@ fun FlowTimeApp(viewModel: AppViewModel = viewModel()) {
                     onOpenTask = { parentTaskId ->
                         navController.navigate("${Routes.TASK_DETAIL}/$parentTaskId")
                     },
+                    onOpenAllRecords = { navController.navigate(Routes.ALL_RECORDS) },
+                )
+                }
+            }
+            composable(Routes.ALL_RECORDS) {
+                FullPage {
+                AllRecordsScreen(
+                    viewModel = viewModel,
+                    onBack = { navController.popBackStack() },
                 )
                 }
             }

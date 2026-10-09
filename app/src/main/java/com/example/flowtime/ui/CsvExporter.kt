@@ -73,7 +73,7 @@ object CsvExporter {
         return "%04d-%02d-%02d %02d:%02d".format(t.year, t.monthValue, t.dayOfMonth, t.hour, t.minute)
     }
 
-    /** 全部明细：每条记录一行，含所属大类与起止时间 */
+    /** 全部明细：每条记录一行，含所属大类、起止时间与来源 */
     private fun buildDetail(
         records: List<FocusRecord>,
         tasks: List<FocusTask>,
@@ -81,12 +81,13 @@ object CsvExporter {
     ): String {
         val index = RecordLink.TaskIndex.of(tasks)
         val catName = categories.associate { it.id to it.name }
-        val sb = StringBuilder("task_name,category,minutes,start_time,end_time\n")
+        val sb = StringBuilder("task_name,category,minutes,start_time,end_time,source\n")
         records.sortedBy { it.endEpochMillis }.forEach { record ->
             val category = index.categoryIdOf(record)?.let { catName[it] } ?: "未分类"
             sb.append(
                 "${escape(index.displayName(record))},${escape(category)},${record.minutes}," +
-                    "${formatTime(record.startEpochMillis)},${formatTime(record.endEpochMillis)}\n",
+                    "${formatTime(record.startEpochMillis)},${formatTime(record.endEpochMillis)}," +
+                    "${record.recordSource.name.lowercase()}\n",
             )
         }
         return sb.toString()

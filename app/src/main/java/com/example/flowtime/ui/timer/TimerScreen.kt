@@ -74,6 +74,7 @@ import com.example.flowtime.ui.components.RingTimer
 import com.example.flowtime.ui.components.pressScale
 import com.example.flowtime.ui.components.rememberAmbientParticlesState
 import com.example.flowtime.ui.components.rememberReducedMotion
+import com.example.flowtime.ui.records.BackfillDialog
 import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.AccentGreen
 import com.example.flowtime.ui.theme.BorderColor
@@ -110,6 +111,7 @@ fun TimerScreen(
     val selectedDuration by viewModel.selectedDurationMinutes.collectAsState()
     val categories by viewModel.categories.collectAsState()
     val settings by viewModel.settings.collectAsState()
+    val records by viewModel.records.collectAsState()
     val task = tasks.firstOrNull { it.id == timer.selectedTaskId }
     val isIdle = timer.phase == AppViewModel.TimerPhase.IDLE
     val reducedMotion = rememberReducedMotion()
@@ -123,6 +125,7 @@ fun TimerScreen(
     val ringMaxSize = minOf(screenHeightDp * 0.33f, screenWidthDp * 0.80f)
         .dp.coerceIn(180.dp, 320.dp)
     var showTaskPicker by remember { mutableStateOf(false) }
+    var showBackfill by remember { mutableStateOf(false) }
     var showCancelConfirm by remember { mutableStateOf(false) }
     var showDurationPicker by remember { mutableStateOf(false) }
     // 时长弹层里的临时值：每次打开都从当前选中时长起步，确定后才写回
@@ -732,19 +735,45 @@ fun TimerScreen(
                 }
                 }
                 Spacer(Modifier.height(8.dp))
-                TextButton(
-                    onClick = {
-                        showTaskPicker = false
-                        // 直达编辑器：跳转任务页后由 newTaskRequest 触发打开新建面板
-                        viewModel.requestNewTask()
-                        onNavigateToTasks()
-                    },
-                    modifier = Modifier.align(Alignment.CenterHorizontally),
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("＋ 新建任务", color = Primary)
+                    // 首页补录入口：沿用当前选中的任务（自由专注也能补，记到未分类）
+                    TextButton(onClick = {
+                        showTaskPicker = false
+                        showBackfill = true
+                    }) {
+                        Text("补录时间", color = Primary)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    TextButton(
+                        onClick = {
+                            showTaskPicker = false
+                            // 直达编辑器：跳转任务页后由 newTaskRequest 触发打开新建面板
+                            viewModel.requestNewTask()
+                            onNavigateToTasks()
+                        },
+                    ) {
+                        Text("＋ 新建任务", color = Primary)
+                    }
                 }
             }
         }
+    }
+
+    if (showBackfill) {
+        BackfillDialog(
+            taskId = task?.id,
+            taskName = task?.name,
+            records = records,
+            onDismiss = { showBackfill = false },
+            onConfirm = { startMillis, endMillis ->
+                viewModel.addManualRecord(task, startMillis, endMillis)
+                showBackfill = false
+            },
+        )
     }
 }
 

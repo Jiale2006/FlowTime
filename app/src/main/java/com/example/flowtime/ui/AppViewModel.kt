@@ -15,11 +15,13 @@ import androidx.lifecycle.viewModelScope
 import com.example.flowtime.service.FocusReminder
 import com.example.flowtime.service.FocusTimerService
 import com.example.flowtime.data.AppSettings
+import com.example.flowtime.data.BackfillRules
 import com.example.flowtime.data.Category
 import com.example.flowtime.data.FlowTimeRepository
 import com.example.flowtime.data.FocusRecord
 import com.example.flowtime.data.FocusTask
 import com.example.flowtime.data.RecordLink
+import com.example.flowtime.data.RecordSource
 import com.example.flowtime.ui.theme.ThemeMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -539,20 +541,48 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun parentOf(task: FocusTask?): FocusTask? =
         task?.parentId?.let { id -> tasks.value.firstOrNull { it.id == id } }
 
-    /** 补录：忘记计时时手动补一条记录（结束时刻由用户在滚轮上选，开始时刻 = 结束 - 时长） */
-    fun addManualRecord(task: FocusTask, minutes: Int, endEpochMillis: Long) {
-        val safeMinutes = minutes.coerceIn(1, 480)
+    /**
+     * 补录：手动补一条记录。
+     *
+     * 区间由调用方用 [BackfillRules.resolve] 按「结束时刻锚定 + 时长」算好后传入
+     * （跨天溢出放行，不在这里再做钳制）；[task] 为 null 表示自由专注（未分类）。
+     * 来源固定写 [RecordSource.MANUAL]——这是"只有它允许改时长"的依据。
+     */
+    fun addManualRecord(task: FocusTask?, startEpochMillis: Long, endEpochMillis: Long) {
+        if (endEpochMillis <= startEpochMillis) return
+        val minutes = ((endEpochMillis - startEpochMillis) / 60_000L).toInt()
+        if (minutes < 1) return
         viewModelScope.launch {
             repo.addRecord(
                 FocusRecord(
-                    taskId = task.id,
-                    taskName = task.name,
-                    minutes = safeMinutes,
-                    startEpochMillis = endEpochMillis - safeMinutes * 60_000L,
+                    taskId = task?.id,
+                    taskName = task?.name ?: FREE_FOCUS_NAME,
+                    minutes = minutes,
+                    startEpochMillis = startEpochMillis,
                     endEpochMillis = endEpochMillis,
+                    source = RecordSource.MANUAL.name,
                 ),
             )
         }
+    }
+
+    /** 删除一条记录（撤销时用 [restoreRecord] 原样插回） */
+    fun deleteRecord(id: Long) {
+        viewModelScope.launch { repo.deleteRecord(id) }
+    }
+
+    /** 撤销删除：带着原 id 插回，位置与内容都不变 */
+    fun restoreRecord(record: FocusRecord) {
+        viewModelScope.launch { repo.addRecord(record) }
+    }
+
+    /**
+     * 改手动补录记录的时长：**结束时刻不变**，开始时刻按新时长回退。
+     * 真实计时的记录直接忽略（[BackfillRules.canEditDuration] 为 false）。
+     */
+    fun updateRecordDuration(record: FocusRecord, minutes: Int) {
+        val updated = BackfillRules.withDuration(record, minutes) ?: return
+        viewModelScope.launch { repo.updateRecord(updated) }
     }
 
     fun deleteTask(taskId: String) {

@@ -9,6 +9,9 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Transaction
+import androidx.room.Update
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.flowtime.data.FocusRecord
 import com.example.flowtime.data.FocusTask
 import kotlinx.coroutines.flow.Flow
@@ -54,6 +57,14 @@ interface FlowTimeDao {
     @Insert
     suspend fun insertRecords(records: List<FocusRecord>)
 
+    /** 改一条记录（目前只用于手动补录记录改时长，结束时刻保持不变） */
+    @Update
+    suspend fun updateRecord(record: FocusRecord)
+
+    /** 删一条记录 */
+    @Query("DELETE FROM records WHERE id = :id")
+    suspend fun deleteRecord(id: Long)
+
     @Query("DELETE FROM records")
     suspend fun clearRecords()
 
@@ -76,7 +87,7 @@ interface FlowTimeDao {
 
 @Database(
     entities = [FocusTask::class, FocusRecord::class],
-    version = 1,
+    version = 2,
     exportSchema = false,
 )
 abstract class FlowTimeDatabase : RoomDatabase() {
@@ -84,6 +95,19 @@ abstract class FlowTimeDatabase : RoomDatabase() {
     abstract fun dao(): FlowTimeDao
 
     companion object {
+        /**
+         * v1 → v2：records 表加 `source` 列（记录来源）。
+         *
+         * 语句必须与实体上 `@ColumnInfo(defaultValue = "TIMER")` 生成的
+         * `DEFAULT 'TIMER'` 完全一致，否则迁移后 Room 的 schema 校验会失败。
+         * 旧数据没有来源概念，一律按 TIMER（真实计时）处理，语义正确。
+         */
+        val MIGRATION_1_2: Migration = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE records ADD COLUMN source TEXT NOT NULL DEFAULT 'TIMER'")
+            }
+        }
+
         @Volatile
         private var instance: FlowTimeDatabase? = null
 
@@ -92,7 +116,10 @@ abstract class FlowTimeDatabase : RoomDatabase() {
                 context.applicationContext,
                 FlowTimeDatabase::class.java,
                 "flowtime.db",
-            ).build().also { instance = it }
+            )
+                .addMigrations(MIGRATION_1_2)
+                .build()
+                .also { instance = it }
         }
     }
 }

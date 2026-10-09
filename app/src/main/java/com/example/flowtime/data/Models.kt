@@ -1,5 +1,6 @@
 package com.example.flowtime.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -12,6 +13,25 @@ data class Category(
     val name: String,
     val colorIndex: Int,
 )
+
+/**
+ * 记录来源。
+ * - [TIMER]：真实计时产生（含番茄专注段）；时长是客观发生的，**不允许改**
+ * - [MANUAL]：手动补录；时长允许修改
+ *
+ * 存成字符串而不是枚举，省掉 Room TypeConverter；旧数据没有这个列时按 [TIMER] 处理。
+ */
+enum class RecordSource {
+    TIMER,
+    MANUAL,
+    ;
+
+    companion object {
+        /** 宽容解析：空 / 未知值一律当 [TIMER]（旧数据语义） */
+        fun of(raw: String?): RecordSource =
+            entries.firstOrNull { it.name.equals(raw, ignoreCase = true) } ?: TIMER
+    }
+}
 
 /**
  * 专注任务（Room 实体：tasks 表）。
@@ -43,7 +63,15 @@ data class FocusRecord(
     /** 本次专注开始时间（旧数据/补录按 end - minutes 推算） */
     val startEpochMillis: Long,
     val endEpochMillis: Long,
-)
+    /**
+     * 来源（TIMER / MANUAL）。默认值必须与 MIGRATION_1_2 里的
+     * `DEFAULT 'TIMER'` 完全一致，否则 Room 的 schema 校验会在迁移后失败。
+     */
+    @ColumnInfo(defaultValue = "TIMER")
+    val source: String = RecordSource.TIMER.name,
+) {
+    val recordSource: RecordSource get() = RecordSource.of(source)
+}
 
 /** 设置页全部配置 */
 data class AppSettings(
