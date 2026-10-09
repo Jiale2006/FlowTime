@@ -165,14 +165,16 @@ fun AllRecordsScreen(
                 }
             }
 
-            // 当前筛选状态：收进按钮就容易"看不见自己筛了什么"，所以这里补一行摘要
+            // 当前筛选状态：收进按钮就容易"看不见自己筛了什么"，所以这里补一行摘要。
+            // 按钮写"看全部"（说他能得到什么），不写"清空"（没说清清的是什么）。
             if (filterActive) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         buildString {
+                            append("正在看：")
                             if (query.isNotBlank()) append("任务「$query」")
                             hourWindow?.let {
-                                if (isNotEmpty()) append(" · ")
+                                if (query.isNotBlank()) append(" · ")
                                 append(hourWindowText(it))
                             }
                             append(" · 共 ${filtered.size} 条")
@@ -188,7 +190,7 @@ fun AllRecordsScreen(
                             customWindow = null
                         },
                     ) {
-                        Text("清空", fontSize = 12.sp, color = Primary)
+                        Text("看全部", fontSize = 12.sp, color = Primary)
                     }
                 }
             } else {
@@ -367,7 +369,7 @@ private fun FilterSheet(
             Spacer(Modifier.height(18.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 TextButton(onClick = onClear, modifier = Modifier.weight(1f)) {
-                    Text("清空筛选", color = TextSecondary, fontSize = 14.sp)
+                    Text("清除条件", color = TextSecondary, fontSize = 14.sp)
                 }
                 Button(
                     onClick = onDismiss,
