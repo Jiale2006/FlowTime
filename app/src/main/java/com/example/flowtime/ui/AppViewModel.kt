@@ -16,6 +16,7 @@ import com.example.flowtime.service.FocusReminder
 import com.example.flowtime.service.FocusTimerService
 import com.example.flowtime.data.AppSettings
 import com.example.flowtime.data.BackfillRules
+import com.example.flowtime.data.BackupFormat
 import com.example.flowtime.data.Category
 import com.example.flowtime.data.FlowTimeRepository
 import com.example.flowtime.data.FocusRecord
@@ -643,13 +644,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 ?: return@withContext RestoreResult.FAILED
             val raw = bytes.toString(Charsets.UTF_8)
             when (repo.checkBackup(raw)) {
-                FlowTimeRepository.BackupCheck.NOT_A_BACKUP ->
+                BackupFormat.Check.NOT_A_BACKUP ->
                     return@withContext RestoreResult.NOT_A_BACKUP
 
-                FlowTimeRepository.BackupCheck.TOO_NEW ->
+                BackupFormat.Check.TOO_NEW ->
                     return@withContext RestoreResult.TOO_NEW
 
-                FlowTimeRepository.BackupCheck.OK -> Unit
+                BackupFormat.Check.OK -> Unit
             }
             repo.saveRollback()
             if (repo.importBackup(raw)) RestoreResult.OK else RestoreResult.FAILED

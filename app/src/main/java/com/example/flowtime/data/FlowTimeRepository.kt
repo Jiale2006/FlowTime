@@ -12,7 +12,6 @@ import com.example.flowtime.data.db.FlowTimeDatabase
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
@@ -24,9 +23,6 @@ private const val DEFAULT_DURATION_MINUTES = 45
 
 /** 旧版本的默认时长默认值，用于一次性迁移判断 */
 private const val LEGACY_DEFAULT_MINUTES = 25
-
-/** 备份文件格式版本：schema 2 起 records 多一个 source 字段、并带上 settings */
-private const val BACKUP_SCHEMA = 2
 
 /** 本机自动回滚点保留份数（超出后删最旧的，避免私有目录无限增长） */
 private const val ROLLBACK_KEEP = 5
@@ -219,44 +215,31 @@ class FlowTimeRepository(private val context: Context) {
     }
 
     // ---- 备份 / 恢复 ----
-
-    /** 备份校验结果，决定 UI 该说什么 */
-    enum class BackupCheck { OK, NOT_A_BACKUP, TOO_NEW }
+    // 编解码全在 BackupFormat（纯 JVM、有单测覆盖），这里只管读写数据库与偏好。
 
     /** 本机自动回滚点：恢复前留底，出事了能一键退回去 */
     data class Rollback(val file: File, val savedAt: Long)
 
-    /**
-     * 只解析头部做校验，不动数据。
-     * 版本比当前新时直接拒绝——否则新字段会被静默丢弃，用户以为恢复成功其实数据缺了一块。
-     */
-    fun checkBackup(raw: String): BackupCheck = runCatching {
-        val json = JSONObject(raw)
-        if (!json.has("tasks") || !json.has("records")) return BackupCheck.NOT_A_BACKUP
-        if (json.optInt("schema", 1) > BACKUP_SCHEMA) return BackupCheck.TOO_NEW
-        BackupCheck.OK
-    }.getOrDefault(BackupCheck.NOT_A_BACKUP)
+    /** 只解析头部做校验，不动数据 */
+    fun checkBackup(raw: String): BackupFormat.Check = BackupFormat.check(raw)
 
     /** 全量导出：任务 + 记录 + 全部设置（头像文件本身不入备份，只存路径） */
-    suspend fun exportBackup(): String = JSONObject()
-        .put("schema", BACKUP_SCHEMA)
-        .put("exportedAt", System.currentTimeMillis())
-        .put("tasks", tasksToJson(dao.tasksOnce()))
-        .put("records", recordsToJson(dao.recordsOnce()))
-        .put("settings", settingsToJson(toSettings(context.flowTimeStore.data.first())))
-        .toString()
+    suspend fun exportBackup(): String = BackupFormat.encode(
+        tasks = dao.tasksOnce(),
+        records = dao.recordsOnce(),
+        settings = toSettings(context.flowTimeStore.data.first()),
+        exportedAt = System.currentTimeMillis(),
+    )
 
     /** 全量恢复：整体覆盖现有数据（调用方负责先留回滚点）。校验不过或解析失败时不动库里数据 */
     suspend fun importBackup(raw: String): Boolean = runCatching {
-        if (checkBackup(raw) != BackupCheck.OK) return false
+        if (BackupFormat.check(raw) != BackupFormat.Check.OK) return false
         val json = JSONObject(raw)
-        val tasks = tasksFromJson(json.getJSONArray("tasks"))
-        val records = recordsFromJson(json.getJSONArray("records"))
-        dao.replaceAll(tasks, records)
+        dao.replaceAll(BackupFormat.tasksOf(json), BackupFormat.recordsOf(json))
         // schema 1 的旧备份没有 settings 段：保持当前设置不动，而不是把它们重置成默认值
-        if (json.has("settings") && !json.isNull("settings")) {
+        if (BackupFormat.hasSettings(json)) {
             val base = toSettings(context.flowTimeStore.data.first())
-            updateSettings(settingsFromJson(json.getJSONObject("settings"), base))
+            updateSettings(BackupFormat.settingsOf(json, base))
         }
     }.isSuccess
 
@@ -293,51 +276,7 @@ class FlowTimeRepository(private val context: Context) {
         importBackup(rollback.file.readText(Charsets.UTF_8))
     }.getOrDefault(false)
 
-    // ---- 设置项的 JSON 编解码 ----
-
-    private fun settingsToJson(s: AppSettings): JSONObject = JSONObject()
-        .put("nickname", s.nickname)
-        // 头像只存路径：同机恢复能复用，换机后路径失效会自动退化成无头像
-        .put("avatarPath", s.avatarPath)
-        .put("defaultDurationMinutes", s.defaultDurationMinutes)
-        .put("taskListView", s.taskListView)
-        .put("ringtoneEnabled", s.ringtoneEnabled)
-        .put("autoStart", s.autoStart)
-        .put("dailyGoalMinutes", s.dailyGoalMinutes)
-        .put("reminderTime", s.reminderTime)
-        .put("reminderEnabled", s.reminderEnabled)
-        .put("pomodoroFocusMinutes", s.pomodoroFocusMinutes)
-        .put("pomodoroBreakMinutes", s.pomodoroBreakMinutes)
-        .put("pomodoroLongBreakMinutes", s.pomodoroLongBreakMinutes)
-        .put("pomodoroRoundsBeforeLongBreak", s.pomodoroRoundsBeforeLongBreak)
-        .put("pomodoroTipShown", s.pomodoroTipShown)
-        .put("statsRange", s.statsRange)
-        .put("themeMode", s.themeMode)
-
-    /** 缺字段就沿用 [base]（当前值），避免旧备份把没存过的项重置成默认 */
-    private fun settingsFromJson(o: JSONObject, base: AppSettings): AppSettings = base.copy(
-        nickname = o.optString("nickname", base.nickname),
-        avatarPath = o.optString("avatarPath", base.avatarPath),
-        defaultDurationMinutes = o.optInt("defaultDurationMinutes", base.defaultDurationMinutes),
-        taskListView = o.optBoolean("taskListView", base.taskListView),
-        ringtoneEnabled = o.optBoolean("ringtoneEnabled", base.ringtoneEnabled),
-        autoStart = o.optBoolean("autoStart", base.autoStart),
-        dailyGoalMinutes = o.optInt("dailyGoalMinutes", base.dailyGoalMinutes),
-        reminderTime = o.optString("reminderTime", base.reminderTime),
-        reminderEnabled = o.optBoolean("reminderEnabled", base.reminderEnabled),
-        pomodoroFocusMinutes = o.optInt("pomodoroFocusMinutes", base.pomodoroFocusMinutes),
-        pomodoroBreakMinutes = o.optInt("pomodoroBreakMinutes", base.pomodoroBreakMinutes),
-        pomodoroLongBreakMinutes = o.optInt("pomodoroLongBreakMinutes", base.pomodoroLongBreakMinutes),
-        pomodoroRoundsBeforeLongBreak = o.optInt(
-            "pomodoroRoundsBeforeLongBreak",
-            base.pomodoroRoundsBeforeLongBreak,
-        ),
-        pomodoroTipShown = o.optBoolean("pomodoroTipShown", base.pomodoroTipShown),
-        statsRange = o.optString("statsRange", base.statsRange),
-        themeMode = o.optString("themeMode", base.themeMode),
-    )
-
-    // ---- JSON 编解码（旧数据迁移与备份共用）----
+    // ---- JSON 编解码（旧数据迁移用；其余见 BackupFormat）----
 
     private fun defaultSeedTasks(): List<FocusTask> = listOf(
         FocusTask("seed-1", "英语阅读", 25, "今天", 0, 0, null),
@@ -346,92 +285,10 @@ class FlowTimeRepository(private val context: Context) {
         FocusTask("seed-4", "复盘总结", 20, "周日", 3, 3, null),
     )
 
-    private fun decodeTasks(raw: String): List<FocusTask> =
-        if (raw.isBlank()) emptyList() else tasksFromJson(JSONArray(raw))
-
-    private fun tasksFromJson(array: JSONArray): List<FocusTask> = List(array.length()) { i ->
-        val obj = array.getJSONObject(i)
-        FocusTask(
-            id = obj.getString("id"),
-            name = obj.getString("name"),
-            durationMinutes = obj.optInt("minutes", 25),
-            dateLabel = obj.optString("dateLabel", "今天"),
-            colorIndex = obj.optInt("colorIndex", 0),
-            // 旧数据无 iconIndex 字段时按 colorIndex 映射，保持原图标
-            iconIndex = obj.optInt("iconIndex", obj.optInt("colorIndex", 0)),
-            // parentId 优先；旧数据里叫 categoryId（旧版独立大类表的 id，已迁移为父任务 id）。
-            // 注意：JSON null 用 optString 会得到字符串 "null"，必须显式判断 isNull，否则顶层任务会被误判为子任务。
-            parentId = obj.optNullableString("parentId") ?: obj.optNullableString("categoryId"),
-        )
-    }
-
-    private fun tasksToJson(list: List<FocusTask>): JSONArray = JSONArray().apply {
-        list.forEach { task ->
-            put(
-                JSONObject()
-                    .put("id", task.id)
-                    .put("name", task.name)
-                    .put("minutes", task.durationMinutes)
-                    .put("dateLabel", task.dateLabel)
-                    .put("colorIndex", task.colorIndex)
-                    .put("iconIndex", task.iconIndex)
-                    .put("parentId", task.parentId ?: JSONObject.NULL),
-            )
-        }
-    }
+    private fun decodeTasks(raw: String): List<FocusTask> = BackupFormat.decodeTasks(raw)
 
     /** 旧版独立大类表的解码（仅一次性迁移使用） */
-    private fun decodeCategories(raw: String): List<Category> {
-        if (raw.isBlank()) return emptyList()
-        val array = JSONArray(raw)
-        return List(array.length()) { i ->
-            val obj = array.getJSONObject(i)
-            Category(
-                id = obj.getString("id"),
-                name = obj.getString("name"),
-                colorIndex = obj.optInt("colorIndex", i),
-            )
-        }
-    }
+    private fun decodeCategories(raw: String): List<Category> = BackupFormat.decodeCategories(raw)
 
-    private fun decodeRecords(raw: String): List<FocusRecord> =
-        if (raw.isBlank()) emptyList() else recordsFromJson(JSONArray(raw))
-
-    private fun recordsFromJson(array: JSONArray): List<FocusRecord> = List(array.length()) { i ->
-        val obj = array.getJSONObject(i)
-        val minutes = obj.optInt("minutes", 0)
-        val end = obj.optLong("endEpochMillis", 0L)
-        FocusRecord(
-            id = obj.optLong("id", 0L),
-            taskId = obj.optNullableString("taskId"),
-            taskName = obj.optString("taskName", ""),
-            minutes = minutes,
-            // 旧数据没有开始时间：按结束时间往前推
-            startEpochMillis = obj.optLong("startEpochMillis", end - minutes * 60_000L),
-            endEpochMillis = end,
-            // schema 1 的旧备份没有 source 列，一律按真实计时处理（与 db 迁移口径一致）
-            source = RecordSource.of(obj.optString("source", null)).name,
-        )
-    }
-
-    private fun recordsToJson(list: List<FocusRecord>): JSONArray = JSONArray().apply {
-        list.forEach { record ->
-            put(
-                JSONObject()
-                    .put("id", record.id)
-                    .put("taskId", record.taskId ?: JSONObject.NULL)
-                    .put("taskName", record.taskName)
-                    .put("minutes", record.minutes)
-                    .put("startEpochMillis", record.startEpochMillis)
-                    .put("endEpochMillis", record.endEpochMillis)
-                    .put("source", record.source),
-            )
-        }
-    }
-
-    /** JSON 里的可空字符串：字段缺失 / null / 空串 / 字符串 "null" 一律当 null */
-    private fun JSONObject.optNullableString(key: String): String? {
-        if (!has(key) || isNull(key)) return null
-        return getString(key).takeIf { it.isNotBlank() && it != "null" }
-    }
+    private fun decodeRecords(raw: String): List<FocusRecord> = BackupFormat.decodeRecords(raw)
 }
