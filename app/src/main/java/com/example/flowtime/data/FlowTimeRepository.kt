@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.util.UUID
 
 private val Context.flowTimeStore: DataStore<Preferences> by preferencesDataStore(name = "flowtime")
@@ -24,9 +25,11 @@ private const val DEFAULT_DURATION_MINUTES = 45
 /** 旧版本的默认时长默认值，用于一次性迁移判断 */
 private const val LEGACY_DEFAULT_MINUTES = 25
 
-/** 备份文件格式版本：以后加字段靠它做兼容 */
-/** 备份文件格式版本：schema 2 起 records 多一个 source 字段（旧备份缺列时按 TIMER 处理） */
+/** 备份文件格式版本：schema 2 起 records 多一个 source 字段、并带上 settings */
 private const val BACKUP_SCHEMA = 2
+
+/** 本机自动回滚点保留份数（超出后删最旧的，避免私有目录无限增长） */
+private const val ROLLBACK_KEEP = 5
 
 /**
  * 本地持久化：
@@ -67,26 +70,27 @@ class FlowTimeRepository(private val context: Context) {
     val tasks: Flow<List<FocusTask>> = dao.tasks()
     val records: Flow<List<FocusRecord>> = dao.records()
 
-    val settings: Flow<AppSettings> = context.flowTimeStore.data.map { prefs ->
-        AppSettings(
-            nickname = prefs[Keys.NICKNAME] ?: "心流用户",
-            avatarPath = prefs[Keys.AVATAR_PATH].orEmpty(),
-            defaultDurationMinutes = prefs[Keys.DEFAULT_MINUTES] ?: DEFAULT_DURATION_MINUTES,
-            taskListView = prefs[Keys.TASK_LIST_VIEW] ?: false,
-            ringtoneEnabled = prefs[Keys.RINGTONE] ?: true,
-            autoStart = prefs[Keys.AUTO_START] ?: true,
-            dailyGoalMinutes = prefs[Keys.DAILY_GOAL] ?: 120,
-            reminderTime = prefs[Keys.REMINDER] ?: "20:00",
-            reminderEnabled = prefs[Keys.REMINDER_ENABLED] ?: false,
-            pomodoroFocusMinutes = prefs[Keys.POMODORO_FOCUS] ?: 25,
-            pomodoroBreakMinutes = prefs[Keys.POMODORO_BREAK] ?: 5,
-            pomodoroLongBreakMinutes = prefs[Keys.POMODORO_LONG_BREAK] ?: 15,
-            pomodoroRoundsBeforeLongBreak = prefs[Keys.POMODORO_ROUNDS] ?: 4,
-            pomodoroTipShown = prefs[Keys.POMODORO_TIP_SHOWN] ?: false,
-            statsRange = prefs[Keys.STATS_RANGE] ?: "WEEK",
-            themeMode = prefs[Keys.THEME_MODE] ?: "NOCTURNE",
-        )
-    }
+    val settings: Flow<AppSettings> = context.flowTimeStore.data.map { toSettings(it) }
+
+    /** DataStore 偏好 → [AppSettings]（备份恢复时也要用同一套映射，所以抽出来） */
+    private fun toSettings(prefs: Preferences): AppSettings = AppSettings(
+        nickname = prefs[Keys.NICKNAME] ?: "心流用户",
+        avatarPath = prefs[Keys.AVATAR_PATH].orEmpty(),
+        defaultDurationMinutes = prefs[Keys.DEFAULT_MINUTES] ?: DEFAULT_DURATION_MINUTES,
+        taskListView = prefs[Keys.TASK_LIST_VIEW] ?: false,
+        ringtoneEnabled = prefs[Keys.RINGTONE] ?: true,
+        autoStart = prefs[Keys.AUTO_START] ?: true,
+        dailyGoalMinutes = prefs[Keys.DAILY_GOAL] ?: 120,
+        reminderTime = prefs[Keys.REMINDER] ?: "20:00",
+        reminderEnabled = prefs[Keys.REMINDER_ENABLED] ?: false,
+        pomodoroFocusMinutes = prefs[Keys.POMODORO_FOCUS] ?: 25,
+        pomodoroBreakMinutes = prefs[Keys.POMODORO_BREAK] ?: 5,
+        pomodoroLongBreakMinutes = prefs[Keys.POMODORO_LONG_BREAK] ?: 15,
+        pomodoroRoundsBeforeLongBreak = prefs[Keys.POMODORO_ROUNDS] ?: 4,
+        pomodoroTipShown = prefs[Keys.POMODORO_TIP_SHOWN] ?: false,
+        statsRange = prefs[Keys.STATS_RANGE] ?: "WEEK",
+        themeMode = prefs[Keys.THEME_MODE] ?: "NOCTURNE",
+    )
 
     /**
      * 一次性迁移：旧版本「默认时长」默认值是 25 分钟，且任何一次设置保存都会把它写进偏好，
@@ -216,22 +220,122 @@ class FlowTimeRepository(private val context: Context) {
 
     // ---- 备份 / 恢复 ----
 
-    /** 全量导出（任务 + 记录），用于换机、重装后恢复 */
+    /** 备份校验结果，决定 UI 该说什么 */
+    enum class BackupCheck { OK, NOT_A_BACKUP, TOO_NEW }
+
+    /** 本机自动回滚点：恢复前留底，出事了能一键退回去 */
+    data class Rollback(val file: File, val savedAt: Long)
+
+    /**
+     * 只解析头部做校验，不动数据。
+     * 版本比当前新时直接拒绝——否则新字段会被静默丢弃，用户以为恢复成功其实数据缺了一块。
+     */
+    fun checkBackup(raw: String): BackupCheck = runCatching {
+        val json = JSONObject(raw)
+        if (!json.has("tasks") || !json.has("records")) return BackupCheck.NOT_A_BACKUP
+        if (json.optInt("schema", 1) > BACKUP_SCHEMA) return BackupCheck.TOO_NEW
+        BackupCheck.OK
+    }.getOrDefault(BackupCheck.NOT_A_BACKUP)
+
+    /** 全量导出：任务 + 记录 + 全部设置（头像文件本身不入备份，只存路径） */
     suspend fun exportBackup(): String = JSONObject()
         .put("schema", BACKUP_SCHEMA)
         .put("exportedAt", System.currentTimeMillis())
         .put("tasks", tasksToJson(dao.tasksOnce()))
         .put("records", recordsToJson(dao.recordsOnce()))
+        .put("settings", settingsToJson(toSettings(context.flowTimeStore.data.first())))
         .toString()
 
-    /** 全量恢复：整体覆盖现有数据。解析失败返回 false，此时不动库里的数据 */
+    /** 全量恢复：整体覆盖现有数据（调用方负责先留回滚点）。校验不过或解析失败时不动库里数据 */
     suspend fun importBackup(raw: String): Boolean = runCatching {
+        if (checkBackup(raw) != BackupCheck.OK) return false
         val json = JSONObject(raw)
-        if (!json.has("tasks") || !json.has("records")) return false
         val tasks = tasksFromJson(json.getJSONArray("tasks"))
         val records = recordsFromJson(json.getJSONArray("records"))
         dao.replaceAll(tasks, records)
+        // schema 1 的旧备份没有 settings 段：保持当前设置不动，而不是把它们重置成默认值
+        if (json.has("settings") && !json.isNull("settings")) {
+            val base = toSettings(context.flowTimeStore.data.first())
+            updateSettings(settingsFromJson(json.getJSONObject("settings"), base))
+        }
     }.isSuccess
+
+    // ---- 本机回滚点 ----
+
+    private val rollbackDir: File
+        get() = File(context.filesDir, "backup").apply { mkdirs() }
+
+    /** 把当前数据存成一份回滚点（恢复备份前自动调用） */
+    suspend fun saveRollback(): Rollback? = runCatching {
+        val now = System.currentTimeMillis()
+        val file = File(rollbackDir, "rollback_$now.json")
+        file.writeText(exportBackup(), Charsets.UTF_8)
+        pruneRollbacks()
+        Rollback(file, now)
+    }.getOrNull()
+
+    /** 本机回滚点，按时间倒序 */
+    fun rollbacks(): List<Rollback> = (rollbackDir.listFiles() ?: emptyArray())
+        .mapNotNull { file ->
+            val stamp = file.name.removePrefix("rollback_").removeSuffix(".json").toLongOrNull()
+                ?: return@mapNotNull null
+            Rollback(file, stamp)
+        }
+        .sortedByDescending { it.savedAt }
+
+    /** 只保留最近的 [ROLLBACK_KEEP] 份 */
+    private fun pruneRollbacks() {
+        rollbacks().drop(ROLLBACK_KEEP).forEach { runCatching { it.file.delete() } }
+    }
+
+    /** 用某个回滚点恢复（同样走 schema 校验） */
+    suspend fun restoreRollback(rollback: Rollback): Boolean = runCatching {
+        importBackup(rollback.file.readText(Charsets.UTF_8))
+    }.getOrDefault(false)
+
+    // ---- 设置项的 JSON 编解码 ----
+
+    private fun settingsToJson(s: AppSettings): JSONObject = JSONObject()
+        .put("nickname", s.nickname)
+        // 头像只存路径：同机恢复能复用，换机后路径失效会自动退化成无头像
+        .put("avatarPath", s.avatarPath)
+        .put("defaultDurationMinutes", s.defaultDurationMinutes)
+        .put("taskListView", s.taskListView)
+        .put("ringtoneEnabled", s.ringtoneEnabled)
+        .put("autoStart", s.autoStart)
+        .put("dailyGoalMinutes", s.dailyGoalMinutes)
+        .put("reminderTime", s.reminderTime)
+        .put("reminderEnabled", s.reminderEnabled)
+        .put("pomodoroFocusMinutes", s.pomodoroFocusMinutes)
+        .put("pomodoroBreakMinutes", s.pomodoroBreakMinutes)
+        .put("pomodoroLongBreakMinutes", s.pomodoroLongBreakMinutes)
+        .put("pomodoroRoundsBeforeLongBreak", s.pomodoroRoundsBeforeLongBreak)
+        .put("pomodoroTipShown", s.pomodoroTipShown)
+        .put("statsRange", s.statsRange)
+        .put("themeMode", s.themeMode)
+
+    /** 缺字段就沿用 [base]（当前值），避免旧备份把没存过的项重置成默认 */
+    private fun settingsFromJson(o: JSONObject, base: AppSettings): AppSettings = base.copy(
+        nickname = o.optString("nickname", base.nickname),
+        avatarPath = o.optString("avatarPath", base.avatarPath),
+        defaultDurationMinutes = o.optInt("defaultDurationMinutes", base.defaultDurationMinutes),
+        taskListView = o.optBoolean("taskListView", base.taskListView),
+        ringtoneEnabled = o.optBoolean("ringtoneEnabled", base.ringtoneEnabled),
+        autoStart = o.optBoolean("autoStart", base.autoStart),
+        dailyGoalMinutes = o.optInt("dailyGoalMinutes", base.dailyGoalMinutes),
+        reminderTime = o.optString("reminderTime", base.reminderTime),
+        reminderEnabled = o.optBoolean("reminderEnabled", base.reminderEnabled),
+        pomodoroFocusMinutes = o.optInt("pomodoroFocusMinutes", base.pomodoroFocusMinutes),
+        pomodoroBreakMinutes = o.optInt("pomodoroBreakMinutes", base.pomodoroBreakMinutes),
+        pomodoroLongBreakMinutes = o.optInt("pomodoroLongBreakMinutes", base.pomodoroLongBreakMinutes),
+        pomodoroRoundsBeforeLongBreak = o.optInt(
+            "pomodoroRoundsBeforeLongBreak",
+            base.pomodoroRoundsBeforeLongBreak,
+        ),
+        pomodoroTipShown = o.optBoolean("pomodoroTipShown", base.pomodoroTipShown),
+        statsRange = o.optString("statsRange", base.statsRange),
+        themeMode = o.optString("themeMode", base.themeMode),
+    )
 
     // ---- JSON 编解码（旧数据迁移与备份共用）----
 

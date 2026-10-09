@@ -607,7 +607,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- 备份 / 恢复 ----
 
-    /** 导出全部任务与记录到用户选定的文件（SAF）；返回是否成功 */
+    /** 恢复结果：分开报错，界面才能说清是"不是备份文件"还是"来自更新的版本" */
+    enum class RestoreResult { OK, NOT_A_BACKUP, TOO_NEW, FAILED }
+
+    /** 导出全部任务、记录与设置到用户选定的文件（SAF）；返回是否成功 */
     suspend fun exportBackupTo(uri: Uri): Boolean = withContext(Dispatchers.IO) {
         runCatching {
             val json = repo.exportBackup()
@@ -621,14 +624,42 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }.getOrDefault(false)
     }
 
-    /** 从备份文件整体覆盖当前数据；返回是否成功（失败时不动现有数据） */
-    suspend fun restoreBackupFrom(uri: Uri): Boolean = withContext(Dispatchers.IO) {
+    /**
+     * 从备份文件整体覆盖当前数据。
+     *
+     * 顺序是刻意的：**先校验 → 再留回滚点 → 最后才覆盖**。
+     * 校验不过时连回滚点都不必产生；覆盖中途失败时库里的数据也没被清掉。
+     */
+    suspend fun restoreBackupFrom(uri: Uri): RestoreResult = withContext(Dispatchers.IO) {
         runCatching {
             val bytes = getApplication<Application>().contentResolver.openInputStream(uri)
                 ?.use { input -> input.readBytes() }
-            if (bytes == null) false else repo.importBackup(bytes.toString(Charsets.UTF_8))
-        }.getOrDefault(false)
+                ?: return@withContext RestoreResult.FAILED
+            val raw = bytes.toString(Charsets.UTF_8)
+            when (repo.checkBackup(raw)) {
+                FlowTimeRepository.BackupCheck.NOT_A_BACKUP ->
+                    return@withContext RestoreResult.NOT_A_BACKUP
+
+                FlowTimeRepository.BackupCheck.TOO_NEW ->
+                    return@withContext RestoreResult.TOO_NEW
+
+                FlowTimeRepository.BackupCheck.OK -> Unit
+            }
+            repo.saveRollback()
+            if (repo.importBackup(raw)) RestoreResult.OK else RestoreResult.FAILED
+        }.getOrDefault(RestoreResult.FAILED)
     }
+
+    /** 本机自动回滚点（时间倒序） */
+    suspend fun rollbackPoints(): List<FlowTimeRepository.Rollback> =
+        withContext(Dispatchers.IO) { repo.rollbacks() }
+
+    /** 用某个回滚点恢复；恢复前再留一份底，于是"这次恢复"本身也能被撤销 */
+    suspend fun restoreFromRollback(rollback: FlowTimeRepository.Rollback): Boolean =
+        withContext(Dispatchers.IO) {
+            repo.saveRollback()
+            repo.restoreRollback(rollback)
+        }
 
     // ---- 个人资料：头像 + 昵称 ----
     /** 头像文件（未设置或文件已丢失时返回 null） */

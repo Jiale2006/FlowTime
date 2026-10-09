@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -67,6 +68,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -93,6 +95,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.flowtime.data.AppSettings
+import com.example.flowtime.data.FlowTimeRepository
 import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.components.ProCard
 import com.example.flowtime.ui.components.pressScale
@@ -113,7 +116,10 @@ import com.example.flowtime.ui.theme.TextPrimary
 import com.example.flowtime.ui.theme.TextSecondary
 import com.example.flowtime.ui.theme.ThemeMode
 import com.example.flowtime.ui.theme.WarningAmber
+import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalDateTime
+import java.time.ZoneId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -147,6 +153,12 @@ fun SettingsScreen(viewModel: AppViewModel) {
     // 备份 / 恢复：走系统文件选择器，无需存储权限
     val scope = rememberCoroutineScope()
     var pendingRestoreUri by remember { mutableStateOf<Uri?>(null) }
+    // 本机自动回滚点：打开备份弹窗时刷新一次列表
+    var rollbackPoints by remember { mutableStateOf<List<FlowTimeRepository.Rollback>>(emptyList()) }
+    var pendingRollback by remember { mutableStateOf<FlowTimeRepository.Rollback?>(null) }
+    LaunchedEffect(dialog) {
+        if (dialog == SettingsDialog.BACKUP) rollbackPoints = viewModel.rollbackPoints()
+    }
     val exportBackup = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
     ) { uri ->
@@ -412,12 +424,17 @@ fun SettingsScreen(viewModel: AppViewModel) {
         SettingsDialog.RINGTONE -> RingtoneDialog(settings, viewModel) { dialog = null }
         SettingsDialog.REMINDER -> ReminderDialog(settings, viewModel, notificationsOk, exactAlarmOk) { dialog = null }
         SettingsDialog.BACKUP -> BackupDialog(
+            rollbacks = rollbackPoints,
             onExport = {
                 exportBackup.launch("flowtime_backup.json")
                 dialog = null
             },
             onRestore = {
                 pickBackup.launch(arrayOf("*/*"))
+                dialog = null
+            },
+            onRestoreRollback = { rollback ->
+                pendingRollback = rollback
                 dialog = null
             },
             onDismiss = { dialog = null },
@@ -427,14 +444,15 @@ fun SettingsScreen(viewModel: AppViewModel) {
         null -> Unit
     }
 
-    // 恢复前二次确认：覆盖不可撤销
+    // 恢复前二次确认：覆盖不可撤销，但会先自动留一份回滚点
     pendingRestoreUri?.let { uri ->
         FlowAlertDialog(
             onDismissRequest = { pendingRestoreUri = null },
             title = { Text("恢复备份", fontWeight = FontWeight.Medium) },
             text = {
                 Text(
-                    "将用这份备份整体覆盖当前的全部任务与记录，无法撤销。建议先导出一份当前数据。",
+                    "将用这份备份整体覆盖当前的全部任务、记录与设置。\n\n" +
+                        "覆盖前会自动在本机留一份「回滚点」，恢复完发现不对可以在「数据备份」里退回来。",
                     fontSize = 14.sp,
                     color = TextSecondary,
                 )
@@ -443,17 +461,54 @@ fun SettingsScreen(viewModel: AppViewModel) {
                 TextButton(onClick = {
                     pendingRestoreUri = null
                     scope.launch {
-                        val ok = viewModel.restoreBackupFrom(uri)
-                        Toast.makeText(
-                            context,
-                            if (ok) "已从备份恢复" else "恢复失败：文件格式不对",
-                            Toast.LENGTH_SHORT,
-                        ).show()
+                        val result = viewModel.restoreBackupFrom(uri)
+                        val message = when (result) {
+                            AppViewModel.RestoreResult.OK -> "已从备份恢复"
+                            AppViewModel.RestoreResult.NOT_A_BACKUP -> "恢复失败：这不是本应用的备份文件"
+                            AppViewModel.RestoreResult.TOO_NEW -> "恢复失败：备份来自更新的版本，请先更新 App"
+                            AppViewModel.RestoreResult.FAILED -> "恢复失败：文件读不出来"
+                        }
+                        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                        rollbackPoints = viewModel.rollbackPoints()
                     }
                 }) { Text("覆盖恢复", color = Gold, fontWeight = FontWeight.Medium) }
             },
             dismissButton = {
                 TextButton(onClick = { pendingRestoreUri = null }) { Text("取消") }
+            },
+        )
+    }
+
+    // 用回滚点恢复：也是覆盖操作，同样二次确认
+    pendingRollback?.let { rollback ->
+        FlowAlertDialog(
+            onDismissRequest = { pendingRollback = null },
+            title = { Text("回滚到这一份", fontWeight = FontWeight.Medium) },
+            text = {
+                Text(
+                    "会把当前的任务、记录与设置整体换回「${rollbackLabel(rollback.savedAt)}」那一份。\n\n" +
+                        "当前数据会先自动留一份新的回滚点，所以这一步本身也能再退回来。",
+                    fontSize = 14.sp,
+                    color = TextSecondary,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val target = rollback
+                    pendingRollback = null
+                    scope.launch {
+                        val ok = viewModel.restoreFromRollback(target)
+                        Toast.makeText(
+                            context,
+                            if (ok) "已回滚到 ${rollbackLabel(target.savedAt)}" else "回滚失败",
+                            Toast.LENGTH_LONG,
+                        ).show()
+                        rollbackPoints = viewModel.rollbackPoints()
+                    }
+                }) { Text("回滚", color = Gold, fontWeight = FontWeight.Medium) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRollback = null }) { Text("取消") }
             },
         )
     }
@@ -1015,11 +1070,13 @@ private fun ReminderDialog(
     )
 }
 
-/** 数据备份：导出 / 恢复两个入口 */
+/** 数据备份：导出 / 恢复 + 本机自动回滚点 */
 @Composable
 private fun BackupDialog(
+    rollbacks: List<FlowTimeRepository.Rollback>,
     onExport: () -> Unit,
     onRestore: () -> Unit,
+    onRestoreRollback: (FlowTimeRepository.Rollback) -> Unit,
     onDismiss: () -> Unit,
 ) {
     FlowAlertDialog(
@@ -1028,16 +1085,41 @@ private fun BackupDialog(
         text = {
             Column {
                 Text(
-                    "备份文件是 JSON，含全部任务与专注记录，可存到「下载」或网盘。",
+                    "备份文件是 JSON，含全部任务、专注记录与设置，可存到「下载」或网盘。" +
+                        "头像文件不包含在内（换机后需要重新设置头像）。",
                     fontSize = 13.sp,
                     color = TextSecondary,
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "恢复会整体覆盖当前数据，且无法撤销。",
+                    "恢复会整体覆盖当前数据；覆盖前会自动留一份回滚点（就是下面这些）。",
                     fontSize = 13.sp,
                     color = Gold,
                 )
+                if (rollbacks.isNotEmpty()) {
+                    Spacer(Modifier.height(14.dp))
+                    Text("本机回滚点", fontSize = 13.sp, color = TextPrimary)
+                    Spacer(Modifier.height(4.dp))
+                    Column(
+                        modifier = Modifier
+                            .heightIn(max = 160.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        rollbacks.forEach { rollback ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    rollbackLabel(rollback.savedAt),
+                                    fontSize = 13.sp,
+                                    color = TextSecondary,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                TextButton(onClick = { onRestoreRollback(rollback) }) {
+                                    Text("回滚", fontSize = 13.sp, color = Primary)
+                                }
+                            }
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
@@ -1049,6 +1131,16 @@ private fun BackupDialog(
             TextButton(onClick = onRestore) { Text("从备份恢复", color = Primary) }
         },
     )
+}
+
+/** 回滚点时间文案：今天 16:28 / 10-08 20:15 */
+private fun rollbackLabel(millis: Long): String {
+    val t = Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault())
+    return if (t.toLocalDate() == LocalDate.now()) {
+        "今天 %02d:%02d".format(t.hour, t.minute)
+    } else {
+        "%02d-%02d %02d:%02d".format(t.monthValue, t.dayOfMonth, t.hour, t.minute)
+    }
 }
 
 @Composable
