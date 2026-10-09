@@ -48,10 +48,13 @@ fun WeeklyBarsPager(
     modifier: Modifier = Modifier,
     barColor: Color = AccentGreen.copy(alpha = 0.65f),
     todayColor: Color = Primary,
+    countDelayMillis: Int = 0,
 ) {
     if (pages.isEmpty()) return
     val pagerState = rememberPagerState(pageCount = { pages.size })
     val current = pages.getOrNull(pagerState.currentPage) ?: pages.first()
+    // 合计也滚动：翻页换周时数字自己数到新值，比直接跳字更容易看出"换了一周"
+    val animatedTotal = rememberCountUp(current.totalMinutes, delayMillis = countDelayMillis)
 
     Column(modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -63,7 +66,7 @@ fun WeeklyBarsPager(
                 modifier = Modifier.weight(1f),
             )
             Text(
-                text = "合计 ${formatMinutesHm(current.totalMinutes)} · ${pagerState.currentPage + 1}/${pages.size}",
+                text = "合计 ${formatMinutesHm(animatedTotal)} · ${pagerState.currentPage + 1}/${pages.size}",
                 fontSize = 12.sp,
                 color = TextSecondary,
             )
@@ -78,32 +81,47 @@ fun WeeklyBarsPager(
                 days = pages[pageIndex].days,
                 barColor = barColor,
                 todayColor = todayColor,
+                countDelayMillis = countDelayMillis,
             )
         }
     }
 }
 
-/** 单周 7 天柱状图（分页/统计页复用） */
+/** 单周 7 天柱状图（分页/统计页复用）：柱形从 0 长起来，柱顶数字同步从 0 数上去 */
 @Composable
 fun WeeklyBarRow(
     days: List<AppViewModel.DayMinutes>,
     modifier: Modifier = Modifier,
     barColor: Color = AccentGreen.copy(alpha = 0.65f),
     todayColor: Color = Primary,
+    countDelayMillis: Int = 0,
 ) {
+    var played by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { played = true }
+
     val maxMinutes = maxOf(days.maxOfOrNull { it.minutes } ?: 0, 30)
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.Bottom,
     ) {
-        days.forEach { day ->
+        days.forEachIndexed { index, day ->
+            val grow by animateFloatAsState(
+                targetValue = if (played) 1f else 0f,
+                animationSpec = tween(520, delayMillis = countDelayMillis + 80 + index * 22, easing = FastOutSlowInEasing),
+                label = "weekBarGrow$index",
+            )
+            val countUp = rememberCountUp(
+                value = day.minutes,
+                durationMillis = 520,
+                delayMillis = countDelayMillis + index * 22,
+            )
             Column(
                 modifier = Modifier.weight(1f),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
-                    text = if (day.minutes > 0) "${day.minutes}" else "",
+                    text = if (day.minutes > 0) "$countUp" else "",
                     fontSize = 10.sp,
                     color = TextSecondary,
                 )
@@ -111,7 +129,7 @@ fun WeeklyBarRow(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height((4 + 106f * day.minutes / maxMinutes).dp)
+                        .height((4 + 106f * day.minutes / maxMinutes * grow).dp)
                         .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
                         .background(if (day.isToday) todayColor else barColor),
                 )
@@ -137,6 +155,7 @@ fun DailyBarsStrip(
     modifier: Modifier = Modifier,
     barColor: Color = AccentGreen.copy(alpha = 0.65f),
     todayColor: Color = Primary,
+    countDelayMillis: Int = 0,
 ) {
     if (days.isEmpty()) return
     var played by remember { mutableStateOf(false) }
@@ -163,15 +182,20 @@ fun DailyBarsStrip(
         days.forEachIndexed { index, day ->
             val grow by animateFloatAsState(
                 targetValue = if (played) 1f else 0f,
-                animationSpec = tween(520, delayMillis = 80 + index * 22, easing = FastOutSlowInEasing),
+                animationSpec = tween(520, delayMillis = countDelayMillis + 80 + index * 22, easing = FastOutSlowInEasing),
                 label = "dayGrow$index",
+            )
+            val countUp = rememberCountUp(
+                value = day.minutes,
+                durationMillis = 520,
+                delayMillis = countDelayMillis + index * 22,
             )
             Column(
                 modifier = if (scrollable) Modifier.width(26.dp) else Modifier.weight(1f),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
-                    text = if (day.minutes > 0) "${day.minutes}" else "",
+                    text = if (day.minutes > 0) "$countUp" else "",
                     fontSize = 10.sp,
                     color = TextSecondary,
                     maxLines = 1,

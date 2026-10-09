@@ -38,6 +38,7 @@ import com.example.flowtime.ui.theme.TextSecondary
 fun HourBarsChart(
     hourMinutes: List<Int>,
     modifier: Modifier = Modifier,
+    startDelayMillis: Int = 0,
 ) {
     if (hourMinutes.all { it <= 0 }) {
         Text("暂无记录，先去完成一次专注吧", fontSize = 13.sp, color = TextPlaceholder)
@@ -57,7 +58,11 @@ fun HourBarsChart(
         hourMinutes.forEachIndexed { hour, minutes ->
             val grow by animateFloatAsState(
                 targetValue = if (played) 1f else 0f,
-                animationSpec = tween(520, delayMillis = 60 + hour * 20, easing = FastOutSlowInEasing),
+                animationSpec = tween(
+                    durationMillis = 520,
+                    delayMillis = startDelayMillis + 60 + hour * 20,
+                    easing = FastOutSlowInEasing,
+                ),
                 label = "hourGrow$hour",
             )
             Column(

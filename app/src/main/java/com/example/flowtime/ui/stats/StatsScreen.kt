@@ -6,7 +6,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.animateIntAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -39,7 +38,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -66,6 +64,7 @@ import com.example.flowtime.ui.components.MonthHeatmapPager
 import com.example.flowtime.ui.components.ProCard
 import com.example.flowtime.ui.components.WeeklyBarsPager
 import com.example.flowtime.ui.components.formatMinutesHm
+import com.example.flowtime.ui.components.rememberCountUp
 import com.example.flowtime.ui.components.pressScale
 import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.AccentGreen
@@ -160,7 +159,7 @@ fun StatsScreen(viewModel: AppViewModel) {
             // 第一张卡**跟范围**：原来它固定全量，于是切到"本周"时同屏出现
             // 「总专注 120h」和「累计专注 3h」——两个都叫专注总量，差 40 倍。
             // 「今日」「连续天数」不范围化：它们是天然的跨范围概念（口径原则里的成就/里程碑类）。
-            Entrance(played = entrancePlayed, delayMillis = 0) {
+            Entrance(played = entrancePlayed, delayMillis = DelayTop) {
                 Column {
                     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         StatCard(
@@ -187,8 +186,8 @@ fun StatsScreen(viewModel: AppViewModel) {
             }
             Spacer(Modifier.height(16.dp))
 
-            // 2. 范围概览：累计 / 日均 / 专注次数 / 单次最长
-            Entrance(played = entrancePlayed, delayMillis = 80) {
+            // 2. 范围概览：日均 / 专注次数 / 单次最长（标题随范围变：本周 / 本月 / 全部概览）
+            Entrance(played = entrancePlayed, delayMillis = DelayOverview) {
                 ProCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(Dimens.CardPadding)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -199,7 +198,7 @@ fun StatsScreen(viewModel: AppViewModel) {
                                 modifier = Modifier.weight(1f),
                             )
                             Text(
-                                "${rangeStats.activeDays} 天有记录",
+                                "${rememberCountUp(rangeStats.activeDays, delayMillis = DelayOverview + CountLag)} 天有记录",
                                 fontSize = 11.sp,
                                 color = TextPlaceholder,
                             )
@@ -209,17 +208,18 @@ fun StatsScreen(viewModel: AppViewModel) {
                             OverviewItem(
                                 label = "日均",
                                 // 范围内已过天数不足时不给数字：周一算出来的"日均"就是当天总量，是个假数字
-                                value = rangeStats.dailyAverageMinutes?.let { formatMinutesHm(it) } ?: "—",
+                                value = rangeStats.dailyAverageMinutes,
                                 modifier = Modifier.weight(1f),
                             )
                             OverviewItem(
                                 label = "专注次数",
-                                value = "${rangeStats.sessionCount} 次",
+                                value = rangeStats.sessionCount,
+                                kind = StatValueKind.COUNT,
                                 modifier = Modifier.weight(1f),
                             )
                             OverviewItem(
                                 label = "单次最长",
-                                value = formatMinutesHm(rangeStats.longestSessionMinutes),
+                                value = rangeStats.longestSessionMinutes,
                                 modifier = Modifier.weight(1f),
                             )
                         }
@@ -232,7 +232,7 @@ fun StatsScreen(viewModel: AppViewModel) {
             // 「全部」档没有可比的上一区间，所以不显示——而不是显示一个假的 0。
             val previousMinutes = rangeStats.previousMinutes
             if (range != StatsRange.ALL && previousMinutes != null) {
-                Entrance(played = entrancePlayed, delayMillis = 120) {
+                Entrance(played = entrancePlayed, delayMillis = DelayCompare) {
                     CompareCard(
                         currentMinutes = rangeStats.totalMinutes,
                         previousMinutes = previousMinutes,
@@ -244,7 +244,7 @@ fun StatsScreen(viewModel: AppViewModel) {
             }
 
             // 3. 专注趋势：全部范围按周分页（左右滑看更早），本周/本月按天
-            Entrance(played = entrancePlayed, delayMillis = 160) {
+            Entrance(played = entrancePlayed, delayMillis = DelayTrend) {
                 ProCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(Dimens.CardPadding)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -269,12 +269,15 @@ fun StatsScreen(viewModel: AppViewModel) {
                             if (records.isEmpty()) {
                                 Text("暂无记录，先去完成一次专注吧", fontSize = 13.sp, color = TextPlaceholder)
                             } else {
-                                WeeklyBarsPager(pages = weekPages)
+                                WeeklyBarsPager(
+                                    pages = weekPages,
+                                    countDelayMillis = DelayTrend + CountLag,
+                                )
                             }
                         } else if (rangeStats.dailyDays.none { it.minutes > 0 }) {
                             Text("${range.label}暂无记录，先去完成一次专注吧", fontSize = 13.sp, color = TextPlaceholder)
                         } else {
-                            DailyBarsStrip(days = rangeStats.dailyDays)
+                            DailyBarsStrip(days = rangeStats.dailyDays, countDelayMillis = DelayTrend + CountLag)
                         }
                     }
                 }
@@ -282,7 +285,7 @@ fun StatsScreen(viewModel: AppViewModel) {
             Spacer(Modifier.height(16.dp))
 
             // 4. 时段分布：24 小时，找出最专注的时段
-            Entrance(played = entrancePlayed, delayMillis = 240) {
+            Entrance(played = entrancePlayed, delayMillis = DelayHours) {
                 ProCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(Dimens.CardPadding)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -292,15 +295,26 @@ fun StatsScreen(viewModel: AppViewModel) {
                                 color = TextPrimary,
                                 modifier = Modifier.weight(1f),
                             )
-                            Text(
-                                peakHourText(rangeStats.hourMinutes),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Primary,
-                            )
+                            peakHourRange(rangeStats.hourMinutes)?.let { peakRange ->
+                                Text(
+                                    "最专注 $peakRange · " +
+                                        formatMinutesHm(
+                                            rememberCountUp(
+                                                rangeStats.hourMinutes.maxOrNull() ?: 0,
+                                                delayMillis = DelayHours + CountLag,
+                                            ),
+                                        ),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Primary,
+                                )
+                            }
                         }
                         Spacer(Modifier.height(14.dp))
-                        HourBarsChart(hourMinutes = rangeStats.hourMinutes)
+                        HourBarsChart(
+                            hourMinutes = rangeStats.hourMinutes,
+                            startDelayMillis = DelayHours + CountLag,
+                        )
                     }
                 }
             }
@@ -464,6 +478,19 @@ fun StatsScreen(viewModel: AppViewModel) {
     }
 }
 
+/**
+ * 有滚动数字的分区的入场延迟（错峰滑入，从上到下依次进场）。
+ * 卡内数字滚动 / 柱子生长 = 该分区延迟 + [CountLag]，这样是「卡片滑到位时数字还在往上数」；
+ * 两者若不一致，靠下的卡片会出现"数字数完了卡片才出现"的脱节感。
+ * 其余分区没有数字，延迟仍写字面量。
+ */
+private const val DelayTop = 0
+private const val DelayOverview = 80
+private const val DelayCompare = 120
+private const val DelayTrend = 160
+private const val DelayHours = 240
+private const val CountLag = 140
+
 /** 今日目标进度：今日专注 / 设置里的「每日目标」（水彩渐变进度条） */
 @Composable
 private fun GoalCard(
@@ -474,7 +501,17 @@ private fun GoalCard(
     modifier: Modifier = Modifier,
 ) {
     val progress = if (goalMinutes <= 0) 0f else (todayMinutes.toFloat() / goalMinutes).coerceIn(0f, 1f)
-    val done = goalMinutes > 0 && todayMinutes >= goalMinutes
+    // 数字从 0 数上去；进度条同步从 0 长出来（只听数字涨、条不动会显得脱节）
+    val animatedToday = rememberCountUp(todayMinutes, delayMillis = DelayTop + CountLag)
+    val animatedProgress by animateFloatAsState(
+        targetValue = progress,
+        animationSpec = tween(900, delayMillis = DelayTop + CountLag, easing = FastOutSlowInEasing),
+        label = "goalProgress",
+    )
+    // 完成态跟着**滚动值**判定：数字涨到目标那一刻文案和颜色一起翻，而不是开场就写"已完成"
+    val done = goalMinutes > 0 && animatedToday >= goalMinutes
+    val animatedStreak = rememberCountUp(bestStreakDays, delayMillis = DelayTop + CountLag)
+    val animatedHitDays = rememberCountUp(goalHitDaysInWeek, delayMillis = DelayTop + CountLag)
     ProCard(modifier = modifier.fillMaxWidth()) {
         Column(Modifier.padding(Dimens.CardPadding)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -485,7 +522,7 @@ private fun GoalCard(
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    "${formatMinutesHm(todayMinutes)} / ${formatMinutesHm(goalMinutes)}",
+                    "${formatMinutesHm(animatedToday)} / ${formatMinutesHm(goalMinutes)}",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                     color = if (done) AccentGreen else Primary,
@@ -499,10 +536,10 @@ private fun GoalCard(
                     .clip(ActivePalette.pillShape)
                     .background(CardCream),
             ) {
-                if (progress > 0f) {
+                if (animatedProgress > 0f) {
                     Box(
                         Modifier
-                            .fillMaxWidth(progress)
+                            .fillMaxWidth(animatedProgress)
                             .height(10.dp)
                             .clip(ActivePalette.pillShape)
                             .background(Brush.horizontalGradient(listOf(AccentGreen, Primary))),
@@ -511,14 +548,14 @@ private fun GoalCard(
             }
             Spacer(Modifier.height(8.dp))
             Text(
-                if (done) "今天的目标已完成" else "还差 ${formatMinutesHm((goalMinutes - todayMinutes).coerceAtLeast(0))}",
+                if (done) "今天的目标已完成" else "还差 ${formatMinutesHm((goalMinutes - animatedToday).coerceAtLeast(0))}",
                 fontSize = 12.sp,
                 color = TextPlaceholder,
             )
             Spacer(Modifier.height(4.dp))
             Text(
                 // 「最近 7 天」是**滚动**窗口，不是本周——同屏有「本周/本月」档位，写"近 7 天"容易被读成本周
-                "最长连续 $bestStreakDays 天 · 最近 7 天达成 $goalHitDaysInWeek/7",
+                "最长连续 $animatedStreak 天 · 最近 7 天达成 $animatedHitDays/7",
                 fontSize = 12.sp,
                 color = TextPlaceholder,
             )
@@ -554,20 +591,29 @@ private fun RangeChip(
     }
 }
 
-/** 概览小项：数值 + 标签（纸张淡彩底，柔和水彩感） */
+/** 概览小项：数值 + 标签（纸张淡彩底，柔和水彩感）。数值同样从 0 数上去 */
 @Composable
 private fun OverviewItem(
     label: String,
-    value: String,
+    value: Int?,
     modifier: Modifier = Modifier,
+    kind: StatValueKind = StatValueKind.DURATION,
+    countDelayMillis: Int = DelayOverview + CountLag,
 ) {
+    val animated = rememberCountUp(value ?: 0, delayMillis = countDelayMillis)
     Column(
         modifier = modifier
             .clip(ActivePalette.tileShape)
             .background(CardCream)
             .padding(horizontal = 14.dp, vertical = 12.dp),
     ) {
-        Text(value, fontSize = 17.sp, fontWeight = FontWeight.Medium, color = Primary)
+        // 值为 null = 这个口径本身不成立（如范围刚开始算不出日均），不给数字，也就不滚动
+        Text(
+            if (value == null) "—" else formatStatValue(kind, animated),
+            fontSize = 17.sp,
+            fontWeight = FontWeight.Medium,
+            color = Primary,
+        )
         Spacer(Modifier.height(2.dp))
         Text(label, fontSize = 11.sp, color = TextSecondary)
     }
@@ -690,8 +736,18 @@ private fun CompareCard(
             }
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OverviewItem("本期", formatMinutesHm(currentMinutes), Modifier.weight(1f))
-                OverviewItem(previousLabel, formatMinutesHm(previousMinutes), Modifier.weight(1f))
+                OverviewItem(
+                    label = "本期",
+                    value = currentMinutes,
+                    modifier = Modifier.weight(1f),
+                    countDelayMillis = DelayCompare + CountLag,
+                )
+                OverviewItem(
+                    label = previousLabel,
+                    value = previousMinutes,
+                    modifier = Modifier.weight(1f),
+                    countDelayMillis = DelayCompare + CountLag,
+                )
             }
         }
     }
@@ -811,14 +867,14 @@ private fun TopDaysCard(days: List<StatsRules.TopDay>) {
     }
 }
 
-/** 「最专注 20:00-21:00 · 45 min」；无记录时返回空串 */
-private fun peakHourText(hourMinutes: List<Int>): String {
-    val peakHour = hourMinutes.indices.maxByOrNull { hourMinutes[it] } ?: return ""
-    val peakMinutes = hourMinutes.getOrElse(peakHour) { 0 }
-    if (peakMinutes <= 0) return ""
-    val start = peakHour.toString().padStart(2, '0')
-    val end = (peakHour + 1).toString().padStart(2, '0')
-    return "最专注 $start:00-$end:00 · ${formatMinutesHm(peakMinutes)}"
+/**
+ * 最专注的时段「20:00-21:00」；无记录返回 null（此时整段文案不显示）。
+ * 时长数字由调用方用 [rememberCountUp] 滚动，所以这里只回时段。
+ */
+private fun peakHourRange(hourMinutes: List<Int>): String? {
+    val peakHour = hourMinutes.indices.maxByOrNull { hourMinutes[it] } ?: return null
+    if (hourMinutes.getOrElse(peakHour) { 0 } <= 0) return null
+    return "%02d:00-%02d:00".format(peakHour, peakHour + 1)
 }
 
 /** 分区错峰入场：淡入 + 上滑（进入减速曲线） */
@@ -843,27 +899,26 @@ private fun Entrance(
     }
 }
 
-private enum class StatValueKind { DURATION, MINUTES, DAYS }
+private enum class StatValueKind { DURATION, MINUTES, DAYS, COUNT }
 
-/** 数字滚动计数卡片（从 0 滚动到目标值） */
+/** 数值 → 文案。滚动过程中也走它，保证中间帧的格式和终值一致（不然会看到 "1440min" 突然变 "24h"） */
+private fun formatStatValue(kind: StatValueKind, value: Int): String = when (kind) {
+    StatValueKind.DURATION, StatValueKind.MINUTES -> formatMinutesHm(value)
+    StatValueKind.DAYS -> "$value 天"
+    StatValueKind.COUNT -> "$value 次"
+}
+
+/** 数字滚动计数卡片（进入时从 0 滚动到目标值） */
 @Composable
 private fun StatCard(
     label: String,
     value: Int,
     kind: StatValueKind,
     modifier: Modifier = Modifier,
+    countDelayMillis: Int = DelayTop + CountLag,
 ) {
-    var target by remember { mutableIntStateOf(0) }
-    LaunchedEffect(value) { target = value }
-    val animated by animateIntAsState(
-        targetValue = target,
-        animationSpec = tween(800, easing = FastOutSlowInEasing),
-        label = "countUp",
-    )
-    val text = when (kind) {
-        StatValueKind.DURATION, StatValueKind.MINUTES -> formatMinutesHm(animated)
-        StatValueKind.DAYS -> "$animated 天"
-    }
+    val animated = rememberCountUp(value, delayMillis = countDelayMillis)
+    val text = formatStatValue(kind, animated)
     ProCard(modifier = modifier) {
         Column(
             // ProCard 的内容 Box 是左上对齐：不撑满宽度的话，下面的
