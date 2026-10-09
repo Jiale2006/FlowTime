@@ -3,6 +3,9 @@ package com.example.flowtime.ui.stats
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -477,6 +480,26 @@ fun StatsScreen(viewModel: AppViewModel) {
 }
 
 /**
+ * 达成扫光：亮带位置由 [p]（0 → 1）驱动，从左扫到右。
+ * 亮带完全移出画面时返回全透明（两端 start==end 会退化，必须保护）。
+ */
+private fun goalShineBrush(p: Float): Brush {
+    val band = 0.3f
+    val start = (p * (1 + band) - band).coerceIn(0f, 1f)
+    val end = (p * (1 + band)).coerceIn(0f, 1f)
+    if (end - start < 0.002f) {
+        return Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+    }
+    return Brush.linearGradient(
+        0f to Color.Transparent,
+        start to Color.Transparent,
+        (start + end) / 2f to Color.White.copy(alpha = 0.55f),
+        end to Color.Transparent,
+        1f to Color.Transparent,
+    )
+}
+
+/**
  * 有滚动数字的分区的入场延迟（错峰滑入，从上到下依次进场）。
  * 卡内数字滚动 / 柱子生长 = 该分区延迟 + [CountLag]，这样是「卡片滑到位时数字还在往上数」；
  * 两者若不一致，靠下的卡片会出现"数字数完了卡片才出现"的脱节感。
@@ -509,6 +532,17 @@ private fun GoalCard(
         easing = OvershootEasing,
     )
     val done = goalMinutes > 0 && todayMinutes >= goalMinutes
+    // 达成瞬间：进度条宽度已钳在满格，过冲看不见 —— 达成感换「高光扫过」这个维度给。
+    // 条约在 140 + 800 = 940ms 长满，扫光随后起跑；刚进页面就已经达成时也照样扫一次。
+    val shine = remember { Animatable(1f) }
+    LaunchedEffect(done) {
+        if (done) {
+            shine.snapTo(0f)
+            shine.animateTo(1f, tween(1000, delayMillis = 980, easing = FastOutSlowInEasing))
+        } else {
+            shine.snapTo(1f)
+        }
+    }
     ProCard(modifier = modifier.fillMaxWidth()) {
         Column(Modifier.padding(Dimens.CardPadding)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -536,20 +570,38 @@ private fun GoalCard(
                 if (animatedProgress > 0f) {
                     Box(
                         Modifier
-                            // spring 会 overshoot，fraction 越界会崩，必须钳回 0..1
+                            // 过冲缓动会超过 1，fraction 越界会崩，必须钳回 0..1
                             .fillMaxWidth(animatedProgress.coerceIn(0f, 1f))
                             .height(10.dp)
                             .clip(ActivePalette.pillShape)
                             .background(Brush.horizontalGradient(listOf(AccentGreen, Primary))),
                     )
                 }
+                if (done) {
+                    Box(
+                        Modifier
+                            .matchParentSize()
+                            .background(goalShineBrush(shine.value)),
+                    )
+                }
             }
             Spacer(Modifier.height(8.dp))
-            Text(
-                if (done) "今天的目标已完成" else "还差 ${formatMinutesHm((goalMinutes - todayMinutes).coerceAtLeast(0))}",
-                fontSize = 12.sp,
-                color = TextPlaceholder,
+            val noteColor by animateColorAsState(
+                targetValue = if (done) AccentGreen else TextPlaceholder,
+                animationSpec = tween(300),
+                label = "goalNoteColor",
             )
+            Crossfade(targetState = done, label = "goalNote") { isDone ->
+                Text(
+                    if (isDone) {
+                        "今天的目标已完成"
+                    } else {
+                        "还差 ${formatMinutesHm((goalMinutes - todayMinutes).coerceAtLeast(0))}"
+                    },
+                    fontSize = 12.sp,
+                    color = noteColor,
+                )
+            }
             Spacer(Modifier.height(4.dp))
             Text(
                 // 「最近 7 天」是**滚动**窗口，不是本周——同屏有「本周/本月」档位，写"近 7 天"容易被读成本周
