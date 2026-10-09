@@ -411,7 +411,8 @@ fun RingTimer(
                             alpha = 0.22f * ringA,
                             style = Stroke(width = strokePx * 0.10f, cap = StrokeCap.Round),
                         )
-                        // 背光暗缘：液体下缘一线近黑（inset bottom shade 的弧形版）
+                        // 背光暗缘：液体下缘一线近黑（inset bottom shade 的弧形版）。
+                        // alpha 收得很低：叠在香槟液体上会发棕褐"泥圈"，月光态点到为止
                         val shadeIns = inset + strokePx * 0.24f
                         drawArc(
                             color = GlassBottomShade,
@@ -420,7 +421,7 @@ fun RingTimer(
                             useCenter = false,
                             topLeft = Offset(shadeIns, shadeIns),
                             size = Size(size.width - shadeIns * 2, size.height - shadeIns * 2),
-                            alpha = 0.5f * ringA,
+                            alpha = 0.22f * ringA,
                             style = Stroke(width = strokePx * 0.12f, cap = StrokeCap.Round),
                         )
                         // 扫光高光：沿环缘缓慢游走的白色反光带（借场景的光，非自身颜色）
@@ -499,10 +500,13 @@ fun RingTimer(
                     center.y + (radius * sin(headAngle)).toFloat(),
                 )
                 if (mode == ThemeMode.NOCTURNE) {
-                    // 液面前缘 = 香槟金游标（全环唯一香槟金定点）：光晕 + 指环 + 亮核
+                    // 液面前缘 = 香槟金游标（全环唯一香槟金定点）：光晕 + 指环 + 亮核。
+                    // 光晕 2s 缓脉动（frameNowMs 只在运行时推进 → 暂停/待机自然静止），
+                    // 环上唯一的活性动效，提示"液面正停在这里"（motion.md：有目的、克制）
+                    val haloPulse = if (breathing) 0.85f + 0.15f * sin(frameNowMs * 0.00314f) else 0.85f
                     drawCircle(
                         color = Champagne.copy(alpha = 0.16f * ringA),
-                        radius = strokePx * 0.85f,
+                        radius = strokePx * haloPulse,
                         center = headCenter,
                     )
                     drawCircle(
@@ -568,9 +572,12 @@ fun RingTimer(
         }
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            // 主题节奏：水彩=500ms 液态晕开；玻璃=500ms 流体（禁 duration-100/150）；涂鸦保留快速淡切
+            // 主题节奏：水彩=500ms 液态晕开（用户验收过的洇墨感）；
+            // 玻璃=250ms —— 跳秒是每秒高频更新，motion.md 要求频繁交互少动效，
+            // 500ms 交叉淡化会让新旧数字长时间叠印重影，250ms 一闪即过
             val tickFadeMs = when (mode) {
-                ThemeMode.WATERCOLOR, ThemeMode.NOCTURNE -> 500
+                ThemeMode.WATERCOLOR -> 500
+                ThemeMode.NOCTURNE -> 250
                 else -> 120
             }
             // 时钟容器宽度钉死在最宽组合上：AnimatedContent 交替时容器会在新旧

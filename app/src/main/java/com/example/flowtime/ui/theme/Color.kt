@@ -205,7 +205,10 @@ object NocturnePalette : AppPalette {
     override val textPlaceholder = Color(0xFF7E8BA0)
     override val dividerColor = GlassBorder
     override val borderColor = GlassBorder
-    override val surfaceCard = GlassFill
+    // 内容卡 = 深色"标准材质"（近实心钢蓝）而非半透明白：Android 端没有逐卡 backdrop blur，
+    // 白 8% 无模糊就是提示词自己禁的"实心假玻璃色块"；Apple 也把玻璃限定在浮层控件，
+    // 内容层用标准材质（方向性顶光/底暗缘仍由 ProCard 绘制）。弹窗/浮层才吃真窗口模糊。
+    override val surfaceCard = Color(0xE616233A)
     override val dialogContainer = Color(0xFF1B2A44)
     override val errorRed = Color(0xFFD98E96)
     override val warningAmber = Color(0xFFD9A45B)

@@ -1,53 +1,53 @@
 package com.example.flowtime.ui.tasks
-
+import com.example.flowtime.ui.components.pastDayLabel
+import androidx.compose.material3.FilterChip
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
-import com.example.flowtime.ui.components.FlowAlertDialog
+import androidx.compose.material.icons.Icons
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -55,16 +55,25 @@ import com.example.flowtime.data.RecordLink
 import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.components.DonutChart
 import com.example.flowtime.ui.components.DonutSlice
+import com.example.flowtime.ui.components.BlurDialogBehind
+import com.example.flowtime.ui.components.DayQuickChip
+import com.example.flowtime.ui.components.DurationWheelBlock
+import com.example.flowtime.ui.components.formatMinutesHm
+import com.example.flowtime.ui.components.HourMinuteWheel
+import com.example.flowtime.ui.components.PastDateWheel
+import com.example.flowtime.ui.components.pressScale
 import com.example.flowtime.ui.components.ProCard
 import com.example.flowtime.ui.components.WeeklyBarsPager
-import com.example.flowtime.ui.components.formatMinutesHm
-import com.example.flowtime.ui.components.pressScale
+import com.example.flowtime.ui.components.WheelHeight
+import com.example.flowtime.ui.components.WheelSelectionBand
 import com.example.flowtime.ui.theme.AccentGreen
+import com.example.flowtime.ui.theme.ActivePalette
+import com.example.flowtime.ui.theme.Dimens
 import com.example.flowtime.ui.theme.DisabledGray
 import com.example.flowtime.ui.theme.DividerColor
 import com.example.flowtime.ui.theme.Gold
+import com.example.flowtime.ui.theme.PaperElevated
 import com.example.flowtime.ui.theme.Primary
-import com.example.flowtime.ui.theme.Dimens
 import com.example.flowtime.ui.theme.PrimaryLight
 import com.example.flowtime.ui.theme.SuccessGreen
 import com.example.flowtime.ui.theme.TaskCardPalette
@@ -75,6 +84,7 @@ import com.example.flowtime.ui.theme.WarningAmber
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+
 
 /**
  * 任务详情页：信息卡 + 小任务区（任何任务都能加小任务）+ 全部记录按周分页柱状图
@@ -380,8 +390,8 @@ fun TaskDetailScreen(
     if (showBackfill && task != null) {
         BackfillDialog(
             onDismiss = { showBackfill = false },
-            onConfirm = { minutes, dateMillis ->
-                viewModel.addManualRecord(task, minutes, dateMillis)
+            onConfirm = { minutes, endMillis ->
+                viewModel.addManualRecord(task, minutes, endMillis)
                 showBackfill = false
             },
         )
@@ -420,72 +430,190 @@ private fun DetailStat(label: String, value: String, modifier: Modifier = Modifi
     }
 }
 
-/** 补录对话框：日期（今天/昨天/前天/自定义）+ 时长 */
-@OptIn(ExperimentalLayoutApi::class)
+/** 补录时长上限：8 小时，与 ViewModel 侧 coerceIn(1, 480) 对齐 */
+private const val BackfillMaxMinutes = 480
+
+/**
+ * 补录：一步式底部弹层。
+ *
+ * 之前是三层弹窗（选结束时刻 → 选日期 → 选时长），点一次补录要点四次，
+ * 而且第一层选的是**结束时刻**再往回倒推开始时间——选"昨天 23:00 + 2 小时"
+ * 会把开始时刻推到今天 01:00，跨天的那段归属就说不清了。
+ * 现在口径统一成「日期 + 开始时刻 + 时长」，结束时刻由程序算出来，
+ * 跨天时预览会明确标"次日"。
+ *
+ * 未来时间钳制：选"今天"时，若开始+时长超过当前时刻，就地截断并在预览里说明，
+ * 不让用户记出一条还没发生的专注。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BackfillDialog(
     onDismiss: () -> Unit,
-    onConfirm: (minutes: Int, dateMillis: Long) -> Unit,
+    onConfirm: (minutes: Int, endMillis: Long) -> Unit,
 ) {
-    val dateOptions = listOf("今天", "昨天", "前天", "自定义")
-    var dateChoice by remember { mutableStateOf("昨天") }
-    var customDate by remember { mutableStateOf("") }
-    var minutesText by remember { mutableStateOf("") }
-
     val zone = ZoneId.systemDefault()
-    val customParsed = customDate.takeIf { it.isNotBlank() }?.let {
-        runCatching { LocalDate.parse(it.trim()) }.getOrNull()
-    }
-    val dateMillis: Long? = when (dateChoice) {
-        "今天" -> LocalDate.now(zone).minusDays(0)
-        "昨天" -> LocalDate.now(zone).minusDays(1)
-        "前天" -> LocalDate.now(zone).minusDays(2)
-        else -> customParsed
-    }?.atStartOfDay(zone)?.toInstant()?.toEpochMilli()
-    val minutes = minutesText.toIntOrNull() ?: 0
-    val valid = dateMillis != null && minutes in 1..480
+    val today = remember { LocalDate.now(zone) }
+    val nowMillis = remember { System.currentTimeMillis() }
 
-    FlowAlertDialog(
+    // 默认昨天 + 20:00 开始、30 分钟：多数人补录的是"昨天下午忘了记"的那一段
+    var daysAgo by remember { mutableStateOf(1) }
+    var showDateWheel by remember { mutableStateOf(false) }
+    var startHour by remember { mutableStateOf(20) }
+    var startMinute by remember { mutableStateOf(0) }
+    var duration by remember { mutableStateOf(30) }
+
+    val date = today.minusDays(daysAgo.toLong())
+    val rawStart = date.atStartOfDay(zone).plusHours(startHour.toLong()).plusMinutes(startMinute.toLong())
+    val rawStartMillis = rawStart.toInstant().toEpochMilli()
+    val rawEndMillis = rawStartMillis + duration * 60_000L
+
+    // 今天不能补未来：结束超过"现在"就按时长回缩；起点本身就在未来的话回缩无意义
+    val isToday = daysAgo == 0
+    // 选"今天"时开始时刻轮直接钳到当下——HIG entering-data："design ways that make it
+    // easy to provide it without making mistakes"：预防优于事后警告+禁用按钮。
+    // 每次重组实时取值（滚轮每动一格都会重组），上限随钟表自然走
+    val startCapMinutes = if (isToday) {
+        val t = Instant.ofEpochMilli(System.currentTimeMillis()).atZone(zone)
+        t.hour * 60 + t.minute
+    } else {
+        23 * 60 + 59
+    }
+    // 日期切回"今天"时，把已经拨出去的未来起点拉回到当下
+    LaunchedEffect(daysAgo) {
+        if (daysAgo == 0) {
+            val t = Instant.ofEpochMilli(System.currentTimeMillis()).atZone(zone)
+            if (startHour * 60 + startMinute > t.hour * 60 + t.minute) {
+                startHour = t.hour
+                startMinute = t.minute
+            }
+        }
+    }
+    val truncated = isToday && rawEndMillis > nowMillis
+    val effectiveMinutes = when {
+        !isToday -> duration
+        // 起点已晚于现在（例如 00:10 选了 08:00）：整段时长都不可用
+        rawStartMillis >= nowMillis -> 0
+        else -> minOf(duration, ((nowMillis - rawStartMillis) / 60_000L).toInt())
+    }
+    val valid = effectiveMinutes >= 1
+    val endMillis = if (truncated) rawStartMillis + effectiveMinutes * 60_000L else rawEndMillis
+
+    val end = Instant.ofEpochMilli(endMillis).atZone(zone)
+    val crossesDay = end.toLocalDate() != date
+    val preview = when {
+        !valid -> "开始时间晚于当前时刻，请改选更早的时间或换个日期"
+        else -> buildString {
+            append("%02d-%02d %02d:%02d".format(date.monthValue, date.dayOfMonth, startHour, startMinute))
+            append(" → ")
+            if (crossesDay) append("次日 ") else append("")
+            append("%02d:%02d".format(end.hour, end.minute))
+            append("（${formatMinutesHm(effectiveMinutes)}）")
+            if (truncated) append(" · 已截断到当前时刻")
+        }
+    }
+
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = { Text("补录时间", fontWeight = FontWeight.Medium) },
-        text = {
-            Column {
-                Text("日期", fontSize = 13.sp, color = TextSecondary)
-                Spacer(Modifier.height(8.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    dateOptions.forEach { d ->
-                        FilterChip(selected = dateChoice == d, onClick = { dateChoice = d }, label = { Text(d) })
-                    }
-                }
-                if (dateChoice == "自定义") {
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = customDate,
-                        onValueChange = { customDate = it.take(10) },
-                        label = { Text("yyyy-MM-dd") },
-                        singleLine = true,
-                        isError = customDate.isNotBlank() && customParsed == null,
-                        modifier = Modifier.fillMaxWidth(),
+        containerColor = PaperElevated,
+    ) {
+        BlurDialogBehind(26.dp)
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = Dimens.ScreenPadding)
+                .padding(bottom = Dimens.ListBottomGap),
+        ) {
+            Text("补录时间", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                listOf(0, 1, 2).forEach { offset ->
+                    DayQuickChip(
+                        label = pastDayLabel(today, offset),
+                        selected = daysAgo == offset,
+                        onClick = {
+                            daysAgo = offset
+                            showDateWheel = false
+                        },
+                        modifier = Modifier.weight(1f),
                     )
                 }
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = minutesText,
-                    onValueChange = { minutesText = it.filter(Char::isDigit).take(3) },
-                    label = { Text("补录时长（分钟，1-480）") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth(),
+                DayQuickChip(
+                    label = if (daysAgo > 2) pastDayLabel(today, daysAgo) else "更多",
+                    selected = daysAgo > 2,
+                    onClick = { showDateWheel = !showDateWheel },
+                    modifier = Modifier.weight(1f),
                 )
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { onConfirm(minutes, dateMillis!!) }, enabled = valid) {
-                Text("补录", color = if (valid) Primary else DisabledGray)
+
+            // 「更多」就地展开日期滚轮，不再套一层弹窗（原来要点开再点确定）
+            if (showDateWheel) {
+                Spacer(Modifier.height(12.dp))
+                Box(Modifier.fillMaxWidth().height(WheelHeight), contentAlignment = Alignment.Center) {
+                    WheelSelectionBand()
+                    PastDateWheel(
+                        daysAgo = daysAgo,
+                        onDaysAgoChange = { daysAgo = it },
+                        today = today,
+                        modifier = Modifier.width(130.dp),
+                        fadeColor = PaperElevated,
+                    )
+                }
             }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
-    )
+
+            Spacer(Modifier.height(16.dp))
+            Text("开始时间", fontSize = 13.sp, color = TextSecondary)
+            Spacer(Modifier.height(4.dp))
+            HourMinuteWheel(
+                hours = startHour,
+                minutes = startMinute,
+                onChange = { h, m ->
+                    startHour = h
+                    startMinute = m
+                },
+                // 日期=今天时钳到当下时刻，拨不进未来；其余日期 00:00-23:59 全开放
+                maxTotalMinutes = startCapMinutes,
+                columnWidth = 62.dp,
+                fadeColor = PaperElevated,
+            )
+
+            Spacer(Modifier.height(16.dp))
+            Text("时长", fontSize = 13.sp, color = TextSecondary)
+            Spacer(Modifier.height(4.dp))
+            DurationWheelBlock(
+                minutes = duration,
+                onChange = { duration = it.coerceIn(0, BackfillMaxMinutes) },
+                maxTotalMinutes = BackfillMaxMinutes,
+                fadeColor = PaperElevated,
+            )
+
+            Spacer(Modifier.height(10.dp))
+            Text(preview, fontSize = 12.sp, color = TextSecondary)
+            if (truncated) {
+                Spacer(Modifier.height(4.dp))
+                Text("不能记录还没发生的专注，已按当前时刻截断。", fontSize = 12.sp, color = WarningAmber)
+            }
+
+            Spacer(Modifier.height(16.dp))
+            Button(
+                onClick = { onConfirm(effectiveMinutes, endMillis) },
+                enabled = valid,
+                modifier = Modifier.fillMaxWidth().height(Dimens.ButtonHeight),
+                shape = ActivePalette.buttonShape,
+                colors = ButtonDefaults.buttonColors(containerColor = Primary),
+            ) {
+                Text(
+                    "补录",
+                    fontSize = 15.sp,
+                    color = if (valid) Color.White else DisabledGray,
+                )
+            }
+        }
+    }
 }
 
 private fun formatEpoch(millis: Long): String {

@@ -539,11 +539,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun parentOf(task: FocusTask?): FocusTask? =
         task?.parentId?.let { id -> tasks.value.firstOrNull { it.id == id } }
 
-    /** 补录：忘记计时时手动补一条记录（取当日 12:00，避免时区边界问题） */
-    fun addManualRecord(task: FocusTask, minutes: Int, dateMillis: Long) {
-        val zone = ZoneId.systemDefault()
-        val day = Instant.ofEpochMilli(dateMillis).atZone(zone).toLocalDate()
-        val endMillis = day.atTime(12, 0).atZone(zone).toInstant().toEpochMilli()
+    /** 补录：忘记计时时手动补一条记录（结束时刻由用户在滚轮上选，开始时刻 = 结束 - 时长） */
+    fun addManualRecord(task: FocusTask, minutes: Int, endEpochMillis: Long) {
         val safeMinutes = minutes.coerceIn(1, 480)
         viewModelScope.launch {
             repo.addRecord(
@@ -551,8 +548,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     taskId = task.id,
                     taskName = task.name,
                     minutes = safeMinutes,
-                    startEpochMillis = endMillis - safeMinutes * 60_000L,
-                    endEpochMillis = endMillis,
+                    startEpochMillis = endEpochMillis - safeMinutes * 60_000L,
+                    endEpochMillis = endEpochMillis,
                 ),
             )
         }

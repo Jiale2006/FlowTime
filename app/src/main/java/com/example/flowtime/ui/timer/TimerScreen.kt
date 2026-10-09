@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -30,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import com.example.flowtime.ui.components.BlurDialogBehind
+import com.example.flowtime.ui.components.HourMinuteWheel
 import com.example.flowtime.ui.components.FlowAlertDialog
 import com.example.flowtime.ui.components.ReedPaintingTimer
 import androidx.compose.material3.Button
@@ -41,9 +41,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -63,7 +63,6 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.flowtime.ui.AppViewModel
@@ -84,12 +83,16 @@ import com.example.flowtime.ui.theme.Dimens
 import com.example.flowtime.ui.theme.DisabledGray
 import com.example.flowtime.ui.theme.ErrorRed
 import com.example.flowtime.ui.theme.MutedSurface
+import com.example.flowtime.ui.theme.OnChampagne
 import com.example.flowtime.ui.theme.PaperElevated
 import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.SurfaceCard
 import com.example.flowtime.ui.theme.TaskCardPalette
 import com.example.flowtime.ui.theme.TextPrimary
 import com.example.flowtime.ui.theme.TextSecondary
+import com.example.flowtime.ui.theme.WarningAmber
+import java.time.Instant
+import java.time.ZoneId
 import com.example.flowtime.ui.theme.ThemeMode
 
 private const val COUNT_UP_PAINT_TOTAL_MS = 60L * 60L * 1000L
@@ -121,8 +124,9 @@ fun TimerScreen(
         .dp.coerceIn(180.dp, 320.dp)
     var showTaskPicker by remember { mutableStateOf(false) }
     var showCancelConfirm by remember { mutableStateOf(false) }
-    var showCustomDuration by remember { mutableStateOf(false) }
     var showDurationPicker by remember { mutableStateOf(false) }
+    // 时长弹层里的临时值：每次打开都从当前选中时长起步，确定后才写回
+    var pickerMinutes by remember { mutableStateOf(0) }
     var showPomodoroSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(completed) {
@@ -337,7 +341,14 @@ fun TimerScreen(
                 } else {
                     RingTimer(
                         progress = if (isIdle) 1f else timer.progress,
-                        pigmentProgress = timer.progress,
+                        // 颜料时间线 = 已用比例（倒计时/番茄：剩余→已用要取反；正计时本来就是
+                        // 小时周期内的已用比例；待机显示起步色）。之前直接传剩余比例，
+                        // 导致开场就是香槟金、结尾反而变蓝——"越紧迫越金"整个反了。
+                        pigmentProgress = when {
+                            isIdle -> 0f
+                            timer.mode == AppViewModel.TimerMode.COUNT_UP -> timer.progress
+                            else -> 1f - timer.progress
+                        },
                         timeText = formatClock(displayMillis),
                     modifier = Modifier.fillMaxHeight(0.94f),
                     breathing = timer.phase == AppViewModel.TimerPhase.RUNNING && !reducedMotion,
@@ -373,7 +384,8 @@ fun TimerScreen(
                             .offset(y = 28.dp)
                             .size(88.dp)
                             .clip(CircleShape)
-                            .background(Brush.verticalGradient(listOf(AccentGreen, Primary)))
+                            // 实心香槟 + 深墨字（白字压亮金对比只有 2.3:1，不及格）
+                            .background(Primary)
                             .pressScale()
                             .clickable {
                                 if (timer.phase == AppViewModel.TimerPhase.RUNNING) {
@@ -386,7 +398,7 @@ fun TimerScreen(
                     ) {
                         Text(
                             text = if (timer.phase == AppViewModel.TimerPhase.RUNNING) "暂停" else "继续",
-                            color = Color.White,
+                            color = if (ActivePalette.mode == ThemeMode.NOCTURNE) OnChampagne else Color.White,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Medium,
                         )
@@ -420,6 +432,9 @@ fun TimerScreen(
                                 if (timer.mode == AppViewModel.TimerMode.POMODORO) {
                                     showPomodoroSheet = true
                                 } else {
+                                    // 弹层从当前已选时长起步：按钮上显示 30min，弹层里也该是 30min。
+                                    // 之前固定回 45min，按钮和弹层对不上，看着像两套数据。
+                                    pickerMinutes = selectedDuration
                                     showDurationPicker = true
                                 }
                             },
@@ -509,72 +524,84 @@ fun TimerScreen(
         )
     }
 
-    if (showCustomDuration) {
-        var customMinutes by remember { mutableStateOf(selectedDuration.toString()) }
-        val customValid = (customMinutes.toIntOrNull() ?: 0) in 1..480
-        FlowAlertDialog(
-            onDismissRequest = { showCustomDuration = false },
-            title = { Text("自定义时长", fontWeight = FontWeight.Medium) },
-            text = {
-                OutlinedTextField(
-                    value = customMinutes,
-                    onValueChange = { customMinutes = it.filter(Char::isDigit).take(3) },
-                    label = { Text("分钟（1-480）") },
-                    singleLine = true,
-                    isError = !customValid,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.selectDuration(customMinutes.toInt())
-                        showCustomDuration = false
-                    },
-                    enabled = customValid,
-                ) {
-                    Text("确定", color = if (customValid) Primary else DisabledGray)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCustomDuration = false }) { Text("取消") }
-            },
-        )
-    }
-
-    // 点「倒计时」弹出：选时长（预设 + 自定义），不占首页版面
+    // 点「倒计时」弹出：选时长（纯小时/分钟滚轮），不占首页版面
     if (showDurationPicker) {
+        // 关掉弹层自身的手势（sheetGesturesEnabled=false）：否则拨滚轮的竖向
+        // 拖拽会被弹层抢走，整层跟着跑、标题被顶出屏幕（用户实测反馈）。
+        // 内容短，直接全展开；关闭走点遮罩 / 返回键 / 两个按钮。
         ModalBottomSheet(
             onDismissRequest = { showDurationPicker = false },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            sheetGesturesEnabled = false,
+            dragHandle = null,
             containerColor = PaperElevated,
         ) {
             BlurDialogBehind(26.dp)
             Column(
                 Modifier
                     .fillMaxWidth()
+                    // 拖拽把手去掉后它那块顶部空间也没了，标题不能顶在圆角上
+                    .padding(top = 24.dp)
                     .padding(horizontal = Dimens.ScreenPadding)
                     .padding(bottom = Dimens.ListBottomGap),
             ) {
                 Text("选择倒计时时长", fontSize = 16.sp, color = TextPrimary)
-                Spacer(Modifier.height(14.dp))
-                DurationSelector(
-                    selectedMinutes = selectedDuration,
-                    onSelect = {
-                        viewModel.selectDuration(it)
-                        showDurationPicker = false
-                    },
-                    onCustom = {
-                        showDurationPicker = false
-                        showCustomDuration = true
-                    },
+                Spacer(Modifier.height(12.dp))
+                // 纯时/分滚轮（用户定稿：不要固定档快选，滚轮本身覆盖 0-8h 任意值）
+                HourMinuteWheel(
+                    hours = pickerMinutes / 60,
+                    minutes = pickerMinutes % 60,
+                    onChange = { h, m -> pickerMinutes = (h * 60 + m).coerceIn(0, 480) },
+                    maxTotalMinutes = 480,
+                    // 弹层底色就是 PaperElevated，遮罩按它叠才不穿帮
+                    fadeColor = PaperElevated,
                 )
                 Spacer(Modifier.height(10.dp))
+                // 结束时刻预览：市面计时软件必备，用户要的是"几点结束"这个信息。
+                // 跨天时额外标出来——8h 倒计时常在夜里设，不说清楚会以为最多到今晚。
+                val validPick = pickerMinutes in 1..480
                 Text(
-                    "当前：${durationLabel(selectedDuration)}",
+                    durationPreviewText(pickerMinutes),
                     fontSize = 13.sp,
-                    color = TextSecondary,
+                    color = if (validPick && durationCrossesDay(pickerMinutes)) WarningAmber else TextSecondary,
                 )
+                Spacer(Modifier.height(14.dp))
+                // 主按钮 = 选完即起（市面软件做法：选25min → 直接进计时），
+                // 次按钮 = 仅写回时长不开跑，留给"只想看看结束时刻"的场合。
+                // 之前只有「确定」，点完弹层关掉什么都不会发生，还得再点一次「开始专注」。
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    TextButton(
+                        onClick = {
+                            viewModel.selectDuration(pickerMinutes.coerceIn(1, 480))
+                            showDurationPicker = false
+                        },
+                        enabled = validPick,
+                        modifier = Modifier.height(Dimens.ButtonHeight),
+                    ) {
+                        Text("仅设置", color = if (validPick) Primary else DisabledGray, fontSize = 14.sp)
+                    }
+                    Button(
+                        onClick = {
+                            val picked = pickerMinutes.coerceIn(1, 480)
+                            viewModel.selectDuration(picked)
+                            viewModel.startFocus()
+                            showDurationPicker = false
+                        },
+                        enabled = validPick,
+                        modifier = Modifier.weight(1f).height(Dimens.ButtonHeight),
+                        shape = ActivePalette.buttonShape,
+                        colors = ButtonDefaults.buttonColors(containerColor = Primary),
+                    ) {
+                        Text(
+                            "开始 ${durationLabel(pickerMinutes.coerceIn(1, 480))} 倒计时",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Light,
+                        )
+                    }
+                }
             }
         }
     }
@@ -723,42 +750,6 @@ fun TimerScreen(
 
 
 @Composable
-private fun DurationSelector(
-    selectedMinutes: Int,
-    onSelect: (Int) -> Unit,
-    onCustom: () -> Unit,
-) {
-    val presets = listOf(1, 30, 45, 60, 90, 120, 150)
-    val hourLabels = mapOf(60 to "1h", 90 to "1.5h", 120 to "2h", 150 to "2.5h")
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        presets.forEach { minutes ->
-            FilterChip(
-                selected = selectedMinutes == minutes,
-                onClick = { onSelect(minutes) },
-                label = { Text(hourLabels[minutes] ?: "${minutes}min", fontSize = 13.sp) },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = CardGreenLight,
-                    selectedLabelColor = Primary,
-                ),
-            )
-        }
-        FilterChip(
-            selected = selectedMinutes !in presets,
-            onClick = onCustom,
-            label = { Text("自定义", fontSize = 13.sp) },
-            colors = FilterChipDefaults.filterChipColors(
-                selectedContainerColor = CardGreenLight,
-                selectedLabelColor = Primary,
-            ),
-        )
-    }
-}
-
-
-@Composable
 private fun ModeSelector(
     selected: AppViewModel.TimerMode,
     onSelect: (AppViewModel.TimerMode) -> Unit,
@@ -790,6 +781,36 @@ private fun durationLabel(minutes: Int): String = when (minutes) {
     120 -> "2h"
     150 -> "2.5h"
     else -> "${minutes}min"
+}
+
+/** 这个时长从此刻起会不会跨过午夜（跨天时预览要标"次日"、警告要变色） */
+private fun durationCrossesDay(minutes: Int): Boolean {
+    if (minutes <= 0) return false
+    val now = Instant.now()
+    return now.atZone(zone()).plusMinutes(minutes.toLong()).toLocalDate() != now.atZone(zone()).toLocalDate()
+}
+
+private fun zone(): ZoneId = ZoneId.systemDefault()
+
+/**
+ * 时长预览：把"多久"翻译成用户真正关心的"几点结束"。
+ * 0 分钟（还没选）时只回时长，避免出现 12:30 → 12:30 这种无意义文案。
+ * 跨天时结束日要跟着变，否则深夜选2h 会显示成"23:10 → 01:10"看不出是第二天。
+ */
+private fun durationPreviewText(minutes: Int): String {
+    if (minutes <= 0) return "请选择时长"
+    val zone = ZoneId.systemDefault()
+    val now = System.currentTimeMillis()
+    val start = Instant.ofEpochMilli(now).atZone(zone)
+    val end = start.plusMinutes(minutes.toLong())
+    val endText = if (end.toLocalDate() == start.toLocalDate()) {
+        "%02d:%02d".format(end.hour, end.minute)
+    } else {
+        "次日 %02d:%02d".format(end.hour, end.minute)
+    }
+    return "现在 %02d:%02d → %s 结束（%s）".format(
+        start.hour, start.minute, endText, durationLabel(minutes),
+    )
 }
 
 private fun formatClock(millis: Long): String {

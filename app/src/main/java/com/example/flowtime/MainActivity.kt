@@ -65,6 +65,8 @@ import com.example.flowtime.ui.theme.FlowTimeTheme
 import com.example.flowtime.ui.theme.NavContainer
 import com.example.flowtime.ui.theme.NavItemUnselected
 import com.example.flowtime.ui.theme.Primary
+import com.example.flowtime.ui.theme.ThemeReveal
+import com.example.flowtime.ui.theme.themeRadialReveal
 import com.example.flowtime.ui.timer.TimerScreen
 
 class MainActivity : ComponentActivity() {
@@ -74,11 +76,31 @@ class MainActivity : ComponentActivity() {
         setContent {
             val viewModel: AppViewModel = viewModel()
             val themeMode by viewModel.themeMode.collectAsState()
+            // 注册主窗口根视图：主题径向揭示用它截旧主题画面（见 ThemeReveal）
+            val rootComposeView = androidx.compose.ui.platform.LocalView.current
+            androidx.compose.runtime.LaunchedEffect(rootComposeView) {
+                com.example.flowtime.ui.theme.ThemeReveal.rootView = rootComposeView
+            }
             // 状态栏/导航栏图标颜色、窗口底色由 FlowTimeTheme 随主题处理
             FlowTimeTheme(themeMode) {
-                // 窄屏等比缩放：让手机上的观感与设计基准（440dp 宽）一致
-                AdaptiveScale {
-                    FlowTimeApp(viewModel)
+                androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+                    // 揭示期间：旧主题截图铺底，新主题整层被圆形蒙版裁切着扩出
+                    com.example.flowtime.ui.theme.ThemeReveal.snapshot?.let {
+                        androidx.compose.foundation.Image(
+                            bitmap = it,
+                            contentDescription = null,
+                            contentScale = androidx.compose.ui.layout.ContentScale.FillBounds,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                    androidx.compose.foundation.layout.Box(
+                        Modifier.fillMaxSize().themeRadialReveal(),
+                    ) {
+                        // 窄屏等比缩放：让手机上的观感与设计基准（440dp 宽）一致
+                        AdaptiveScale {
+                            FlowTimeApp(viewModel)
+                        }
+                    }
                 }
             }
         }

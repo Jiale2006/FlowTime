@@ -105,13 +105,19 @@ class AmbientParticlesState internal constructor() {
         val h = viewport.height
         if (w == 0 || h == 0) return
         val iterator = motes.iterator()
+        // 中心文字禁区：飘进圆心附近（时间数字区）的粒子直接消散，不干扰读数
+        val keepOutR = minOf(w, h) * 0.21f
+        val cx = w / 2f
+        val cy = h / 2f
         while (iterator.hasNext()) {
             val m = iterator.next()
             m.life--
             m.swayPhase += 0.05f
             m.x += m.vx + sin(m.swayPhase) * 0.3f * density
             m.y += m.vy
-            if (m.life <= 0 || m.y < -20f) iterator.remove()
+            val dx = m.x - cx
+            val dy = m.y - cy
+            if (m.life <= 0 || m.y < -20f || dx * dx + dy * dy < keepOutR * keepOutR) iterator.remove()
         }
         if (spawn) {
             val target = (targetCount * intensity).toInt()

@@ -17,6 +17,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalView
+import android.animation.ValueAnimator
+import com.example.flowtime.ui.theme.ThemeReveal
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -46,6 +55,7 @@ import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.VolumeUp
 import com.example.flowtime.ui.components.FlowAlertDialog
+import com.example.flowtime.ui.components.HourMinuteWheel
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -102,6 +112,8 @@ import com.example.flowtime.ui.theme.PrimaryDark
 import com.example.flowtime.ui.theme.TextPrimary
 import com.example.flowtime.ui.theme.TextSecondary
 import com.example.flowtime.ui.theme.ThemeMode
+import com.example.flowtime.ui.theme.WarningAmber
+import java.time.LocalDateTime
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -491,7 +503,11 @@ private fun Chevron() {
     )
 }
 
-/** 主题选择弹层：列出全部主题（AllPalettes 顺序），色点预览 + 名称，点选即换 */
+/**
+ * 主题选择弹层：列出全部主题（AllPalettes 顺序），色点预览 + 名称，点选即换。
+ * 换装走径向揭示：先截旧主题画面 → 以触点为圆心把新主题圆形扩出（ThemeReveal）；
+ * 系统"减弱动画"（动画时长缩放=0）时跳过揭示，直接普通切换。
+ */
 @Composable
 private fun ThemePickerDialog(
     current: ThemeMode,
@@ -507,7 +523,14 @@ private fun ThemePickerDialog(
                     ThemeOptionRow(
                         palette = palette,
                         selected = palette.mode == current,
-                        onClick = {
+                        onClick = { centerPx ->
+                            // 点的就是当前主题 → 什么都不发生：不截旧画面、不起揭示、
+                            // 不写重复的偏好、也不关弹层（用户要的是"这一下是空操作"）
+                            if (palette.mode == current) return@ThemeOptionRow
+                            if (ValueAnimator.getDurationScale() > 0f) {
+                                val snap = ThemeReveal.captureRoot()
+                                ThemeReveal.start(centerPx ?: Offset.Zero, snap)
+                            }
                             viewModel.setThemeMode(palette.mode)
                             onDismiss()
                         },
@@ -524,16 +547,43 @@ private fun ThemePickerDialog(
     )
 }
 
-/** 弹层里的单个主题选项：色点 + 名称 + 一句话风格，选中 = 淡彩底 + 勾 */
+/**
+ * 弹层里的单个主题选项：色点 + 名称 + 一句话风格，选中 = 淡彩底 + 勾。
+ * 记录按下触点（换算为主窗口屏幕坐标；键盘触发时退化为行中心）交给 onClick。
+ */
 @Composable
 private fun ThemeOptionRow(
     palette: AppPalette,
     selected: Boolean,
-    onClick: () -> Unit,
+    onClick: (Offset?) -> Unit,
 ) {
+    val composeView = LocalView.current
+    var coords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var downPos by remember { mutableStateOf<Offset?>(null) }
+
+    fun fire() {
+        val c = coords
+        val p = downPos ?: c?.size?.let { Offset(it.width / 2f, it.height / 2f) }
+        val screen = if (c != null && p != null) {
+            val loc = IntArray(2)
+            composeView.getLocationOnScreen(loc)
+            val root = c.localToRoot(p)
+            Offset(loc[0] + root.x, loc[1] + root.y)
+        } else {
+            null
+        }
+        onClick(screen)
+    }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    downPos = awaitFirstDown(requireUnconsumed = false).position
+                }
+            }
+            .onGloballyPositioned { coords = it }
             .clip(ActivePalette.tileShape)
             .background(if (selected) CardGreenLight else Color.Transparent)
             .sketchStroke(
@@ -541,7 +591,7 @@ private fun ThemeOptionRow(
                 if (selected) Primary else DividerColor,
                 1.dp,
             )
-            .clickable(onClick = onClick)
+            .clickable(onClick = ::fire)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -699,11 +749,14 @@ private fun ProfileDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
 @Composable
 private fun DurationDialog(settings: AppSettings, viewModel: AppViewModel, onDismiss: () -> Unit) {
     val options = listOf(15, 25, 30, 45, 60)
-    var selected by remember { mutableStateOf(settings.defaultDurationMinutes) }
-    var custom by remember { mutableStateOf("") }
-    val isCustom = selected !in options
-    val finalMinutes = if (isCustom) custom.toIntOrNull() ?: 0 else selected
-    val valid = finalMinutes in 1..240
+    // 上限统一 480（8h）：原来这里单独卡 240，而首页倒计时弹层和补录都是 480，
+    // 三处口径不一致会让"设置里选 4h、首页能选 8h"看着像两套规则。
+    var minutes by remember { mutableStateOf(settings.defaultDurationMinutes.coerceIn(1, 480)) }
+    val valid = minutes in 1..480
+    // 8h 可能跨夜，选到跨天时把结束时刻说清楚（否则用户以为最多到今晚）
+    val startNow = remember { LocalDateTime.now() }
+    val endAt = startNow.plusMinutes(minutes.toLong())
+    val crossesDay = endAt.toLocalDate() != startNow.toLocalDate()
 
     FlowAlertDialog(
         onDismissRequest = onDismiss,
@@ -714,26 +767,28 @@ private fun DurationDialog(settings: AppSettings, viewModel: AppViewModel, onDis
                 Spacer(Modifier.height(10.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     options.forEach { m ->
-                        FilterChip(selected = selected == m, onClick = { selected = m }, label = { Text("$m 分钟") })
+                        FilterChip(
+                            selected = minutes == m,
+                            onClick = { minutes = m },
+                            label = { Text("$m 分钟") },
+                        )
                     }
-                    FilterChip(
-                        selected = isCustom,
-                        onClick = {
-                            selected = -1
-                            custom = settings.defaultDurationMinutes.toString()
-                        },
-                        label = { Text("自定义") },
-                    )
                 }
-                if (isCustom) {
+                Spacer(Modifier.height(6.dp))
+                HourMinuteWheel(
+                    hours = minutes / 60,
+                    minutes = minutes % 60,
+                    onChange = { h, m -> minutes = (h * 60 + m).coerceIn(1, 480) },
+                    maxTotalMinutes = 480,
+                )
+                if (crossesDay) {
                     Spacer(Modifier.height(8.dp))
-                    OutlinedTextField(
-                        value = custom,
-                        onValueChange = { custom = it.filter(Char::isDigit).take(3) },
-                        label = { Text("分钟（1-240）") },
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth(),
+                    Text(
+                        "这个时长会跨夜：%02d:%02d 开始，次日 %02d:%02d 结束".format(
+                            startNow.hour, startNow.minute, endAt.hour, endAt.minute,
+                        ),
+                        fontSize = 12.sp,
+                        color = WarningAmber,
                     )
                 }
             }
@@ -741,7 +796,7 @@ private fun DurationDialog(settings: AppSettings, viewModel: AppViewModel, onDis
         confirmButton = {
             TextButton(
                 onClick = {
-                    viewModel.updateSettings(viewModel.settings.value.copy(defaultDurationMinutes = finalMinutes))
+                    viewModel.updateSettings(viewModel.settings.value.copy(defaultDurationMinutes = minutes))
                     onDismiss()
                 },
                 enabled = valid,

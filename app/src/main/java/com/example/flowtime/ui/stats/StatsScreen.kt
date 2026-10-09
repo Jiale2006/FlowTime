@@ -663,7 +663,11 @@ private fun StatCard(
     }
     ProCard(modifier = modifier) {
         Column(
-            modifier = Modifier.padding(vertical = 16.dp),
+            // ProCard 的内容 Box 是左上对齐：不撑满宽度的话，下面的
+            // CenterHorizontally 只是在"自己那一小条"里居中，肉眼就是偏左
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(text, fontSize = 20.sp, fontWeight = FontWeight.Medium, color = Primary)
