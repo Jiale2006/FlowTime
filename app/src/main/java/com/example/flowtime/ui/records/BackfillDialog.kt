@@ -336,6 +336,8 @@ fun BackfillDialog(
             initialMinutes = duration,
             maxTotalMinutes = BackfillRules.MAX_MINUTES,
             summary = ::compactDuration,
+            clampTo = BackfillRules.MAX_MINUTES,
+            clampNote = "最长 ${BackfillRules.MAX_MINUTES / 60} 小时，超出会按这个时长记录",
             onDismiss = { picker = FieldPicker.NONE },
             onConfirm = { total ->
                 duration = total.coerceIn(0, BackfillRules.MAX_MINUTES)
@@ -389,7 +391,8 @@ private fun WheelPickerDialog(
                 HourMinuteWheel(
                     hours = pending / 60,
                     minutes = pending % 60,
-                    onChange = { h, m -> pending = (h * 60 + m).coerceIn(0, maxTotalMinutes) },
+                    // 不在这里钳：钳了会让滚轮"拨了没反应"，越界统一由 clampTo 在确定时兜住
+                    onChange = { h, m -> pending = h * 60 + m },
                     maxTotalMinutes = maxTotalMinutes,
                     columnWidth = 62.dp,
                 )

@@ -571,20 +571,31 @@ fun TimerScreen(
                 HourMinuteWheel(
                     hours = pickerMinutes / 60,
                     minutes = pickerMinutes % 60,
-                    onChange = { h, m -> pickerMinutes = (h * 60 + m).coerceIn(0, BackfillRules.MAX_MINUTES) },
+                    // 不在这里钳：钳了会让滚轮"拨了没反应"（拨到 24 小时后分钟永远回到 0）。
+                    // 越界照常显示、按上限生效，并在下面写明。
+                    onChange = { h, m -> pickerMinutes = h * 60 + m },
                     maxTotalMinutes = BackfillRules.MAX_MINUTES,
                     // 弹层底色就是 PaperElevated，遮罩按它叠才不穿帮
                     fadeColor = PaperElevated,
                 )
                 Spacer(Modifier.height(10.dp))
                 // 结束时刻预览：市面计时软件必备，用户要的是"几点结束"这个信息。
-                // 跨天时额外标出来——8h 倒计时常在夜里设，不说清楚会以为最多到今晚。
-                val validPick = pickerMinutes in 1..BackfillRules.MAX_MINUTES
+                // 跨天时额外标出来——长倒计时常在夜里设，不说清楚会以为最多到今晚。
+                val picked = pickerMinutes.coerceIn(1, BackfillRules.MAX_MINUTES)
+                val validPick = pickerMinutes >= 1
                 Text(
-                    durationPreviewText(pickerMinutes),
+                    durationPreviewText(picked),
                     fontSize = 13.sp,
-                    color = if (validPick && durationCrossesDay(pickerMinutes)) WarningAmber else TextSecondary,
+                    color = if (validPick && durationCrossesDay(picked)) WarningAmber else TextSecondary,
                 )
+                if (pickerMinutes > BackfillRules.MAX_MINUTES) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "最长 ${BackfillRules.MAX_MINUTES / 60} 小时，超出会按这个时长记录",
+                        fontSize = 11.sp,
+                        color = WarningAmber,
+                    )
+                }
                 Spacer(Modifier.height(14.dp))
                 // 主按钮 = 选完即起（市面软件做法：选25min → 直接进计时），
                 // 次按钮 = 仅写回时长不开跑，留给"只想看看结束时刻"的场合。
@@ -595,7 +606,7 @@ fun TimerScreen(
                 ) {
                     TextButton(
                         onClick = {
-                            viewModel.selectDuration(pickerMinutes.coerceIn(1, BackfillRules.MAX_MINUTES))
+                            viewModel.selectDuration(picked)
                             showDurationPicker = false
                         },
                         enabled = validPick,
@@ -605,7 +616,6 @@ fun TimerScreen(
                     }
                     Button(
                         onClick = {
-                            val picked = pickerMinutes.coerceIn(1, BackfillRules.MAX_MINUTES)
                             viewModel.selectDuration(picked)
                             viewModel.startFocus()
                             showDurationPicker = false
@@ -616,7 +626,7 @@ fun TimerScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = Primary),
                     ) {
                         Text(
-                            "开始 ${durationLabel(pickerMinutes.coerceIn(1, BackfillRules.MAX_MINUTES))} 倒计时",
+                            "开始 ${durationLabel(picked)} 倒计时",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Light,
                         )
@@ -821,12 +831,15 @@ private fun ModeSelector(
 }
 
 /** 时长标签：与需求一致的 30min / 45min / 1h / 1.5h / 2h / 2.5h 写法 */
-private fun durationLabel(minutes: Int): String = when (minutes) {
-    60 -> "1h"
-    90 -> "1.5h"
-    120 -> "2h"
-    150 -> "2.5h"
-    else -> "${minutes}min"
+/**
+ * 时长文案：45min / 1h / 1.5h / 2h30m。
+ * 上限提到 24h 后必须能正确写出整小时——否则按钮会显示"开始 1440min 倒计时"。
+ */
+private fun durationLabel(minutes: Int): String = when {
+    minutes < 60 -> "${minutes}min"
+    minutes % 60 == 0 -> "${minutes / 60}h"
+    minutes % 30 == 0 -> "${minutes / 60}.5h"
+    else -> "${minutes / 60}h${minutes % 60}m"
 }
 
 /** 这个时长从此刻起会不会跨过午夜（跨天时预览要标"次日"、警告要变色） */

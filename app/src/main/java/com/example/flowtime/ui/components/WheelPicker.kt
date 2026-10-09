@@ -222,15 +222,17 @@ private const val MINUTES_PER_DAY = 24 * 60
 /**
  * 一行「小时 + 分钟」滚轮：外圈画选中带与淡出遮罩，内部两列共用。
  *
- * 2026-10-09 重构：**两列的长度互不依赖**。
- * 早先的写法是"分钟上限依赖小时、小时上限依赖分钟"，看着像"让人根本选不出错"，
- * 实测会出两个怪现象：
- * - 分钟停在 30 时去拨小时，拨到 8 会因为 8h30m 超限，把小时列从 0..8 缩成 0..7，
- *   刚拨上去的 8 被**静默顶回 7**；
- * - 分钟停在 59 时，小时列只到 17，18:00 这种完全合法的组合反而**拨不到**。
+ * **组件不做任何上限钳制**：小时列 0..maxHours、分钟列固定 0..59，随便拨。
  *
- * 现在小时列固定 0..maxHours、分钟列固定 0..59，超限时**只压分钟**，绝不动刚拨的那一列。
- * 上限判定的落点：[maxTotalMinutes] 之内任意组合都能选出来（默认整天 1440）。
+ * 为什么不做（两次都栽在这上面）：
+ * - 第一版让两列互相当对方的"上限"（`hourMax` 依赖分钟、`minuteMax` 依赖小时）：
+ *   分钟停在 30 时拨小时到 8，小时列会从 0..8 缩成 0..7，**刚拨上去的 8 被静默顶回 7**；
+ * - 第二版改成"拨完把越界的那一列压到合法值"：于是上限落在整点时（24 小时），
+ *   **分钟列拨到 20 或 40 都会自己弹回 0**——用户的原话是"分钟不管拨到几都自动到 0"。
+ *
+ * 两种做法的共同毛病都是**让用户看到"拨了没反应"**，那比"允许选出一个越界值、
+ * 再在确定时兜住并写明按什么记录"糟糕得多。
+ * 所以越界处理统一交给调用方在**确定 / 使用时**做（见 `WheelPickerDialog` 的 clampTo）。
  */
 @Composable
 fun HourMinuteWheel(
@@ -244,8 +246,7 @@ fun HourMinuteWheel(
 ) {
     val maxHours = (maxTotalMinutes / 60).coerceIn(0, 24)
     val h = hours.coerceIn(0, maxHours)
-    // 显示也按上限夹一次：否则会画出"08:30"这种其实不存在的组合
-    val m = minutes.coerceIn(0, (maxTotalMinutes - h * 60).coerceIn(0, 59))
+    val m = minutes.coerceIn(0, 59)
     val hourItems = remember(maxHours) { (0..maxHours).map { "%02d".format(it) } }
     val minuteItems = remember { (0..59).map { "%02d".format(it) } }
 
@@ -259,11 +260,7 @@ fun HourMinuteWheel(
             WheelColumn(
                 items = hourItems,
                 selectedIndex = h,
-                onIndexChange = { picked ->
-                    // 只把分钟压到合法值，picked 原样写回 —— 出现"拨到 8 又跳回 7"就是这里没做好
-                    val rest = (maxTotalMinutes - picked * 60).coerceIn(0, 59)
-                    onChange(picked, m.coerceAtMost(rest))
-                },
+                onIndexChange = { picked -> onChange(picked, m) },
                 modifier = Modifier.width(columnWidth),
                 fadeColor = fadeColor,
             )
@@ -273,10 +270,7 @@ fun HourMinuteWheel(
             WheelColumn(
                 items = minuteItems,
                 selectedIndex = m,
-                onIndexChange = { picked ->
-                    val rest = (maxTotalMinutes - h * 60).coerceIn(0, 59)
-                    onChange(h, picked.coerceAtMost(rest))
-                },
+                onIndexChange = { picked -> onChange(h, picked) },
                 modifier = Modifier.width(columnWidth),
                 fadeColor = fadeColor,
             )

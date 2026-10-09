@@ -809,10 +809,14 @@ private fun DurationDialog(settings: AppSettings, viewModel: AppViewModel, onDis
     // 这里曾单独卡 240，后来统一成 480，2026-10-09 又一起提到 1440——
     // 三处共用一个常量，就不会再出现"这里能选 8h、那里只能选 4h"的错位。
     var minutes by remember { mutableStateOf(settings.defaultDurationMinutes.coerceIn(1, BackfillRules.MAX_MINUTES)) }
-    val valid = minutes in 1..BackfillRules.MAX_MINUTES
+    // 上限在滚轮里也拨得到，所以这里**不压回**（压回去会让滚轮"拨了没反应"）：
+    // 超出部分按上限生效，并在下面写明
+    val effective = minutes.coerceIn(1, BackfillRules.MAX_MINUTES)
+    val overLimit = minutes > BackfillRules.MAX_MINUTES
+    val valid = minutes >= 1
     // 长时长会跨夜，选到跨天时把结束时刻说清楚（否则用户以为最多到今晚）
     val startNow = remember { LocalDateTime.now() }
-    val endAt = startNow.plusMinutes(minutes.toLong())
+    val endAt = startNow.plusMinutes(effective.toLong())
     val crossesDay = endAt.toLocalDate() != startNow.toLocalDate()
 
     FlowAlertDialog(
@@ -835,9 +839,17 @@ private fun DurationDialog(settings: AppSettings, viewModel: AppViewModel, onDis
                 HourMinuteWheel(
                     hours = minutes / 60,
                     minutes = minutes % 60,
-                    onChange = { h, m -> minutes = (h * 60 + m).coerceIn(1, BackfillRules.MAX_MINUTES) },
+                    onChange = { h, m -> minutes = h * 60 + m },
                     maxTotalMinutes = BackfillRules.MAX_MINUTES,
                 )
+                if (overLimit) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "最长 ${BackfillRules.MAX_MINUTES / 60} 小时，超出会按这个时长记录",
+                        fontSize = 12.sp,
+                        color = WarningAmber,
+                    )
+                }
                 if (crossesDay) {
                     Spacer(Modifier.height(8.dp))
                     Text(
@@ -853,7 +865,7 @@ private fun DurationDialog(settings: AppSettings, viewModel: AppViewModel, onDis
         confirmButton = {
             TextButton(
                 onClick = {
-                    viewModel.updateSettings(viewModel.settings.value.copy(defaultDurationMinutes = minutes))
+                    viewModel.updateSettings(viewModel.settings.value.copy(defaultDurationMinutes = effective))
                     onDismiss()
                 },
                 enabled = valid,
