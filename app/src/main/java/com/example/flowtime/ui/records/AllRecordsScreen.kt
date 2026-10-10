@@ -57,6 +57,7 @@ import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.TextPlaceholder
 import com.example.flowtime.ui.theme.TextPrimary
 import com.example.flowtime.ui.theme.TextSecondary
+import com.example.flowtime.ui.theme.WarningAmber
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -248,6 +249,7 @@ fun AllRecordsScreen(
 
         RecordUndoBar(
             visible = deletedRecord != null,
+            accent = WarningAmber,
             onUndo = {
                 deletedRecord?.let { viewModel.restoreRecord(it) }
                 deletedRecord = null

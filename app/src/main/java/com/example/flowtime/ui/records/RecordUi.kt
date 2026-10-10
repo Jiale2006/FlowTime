@@ -8,6 +8,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -49,6 +50,7 @@ import com.example.flowtime.ui.components.BlurDialogBehind
 import com.example.flowtime.ui.components.DurationWheelBlock
 import com.example.flowtime.ui.components.formatMinutesHm
 import com.example.flowtime.ui.components.pressScale
+import com.example.flowtime.ui.components.softShadow
 import com.example.flowtime.ui.theme.AccentGreen
 import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.CardGreenLight
@@ -56,6 +58,7 @@ import com.example.flowtime.ui.theme.Dimens
 import com.example.flowtime.ui.theme.DividerColor
 import com.example.flowtime.ui.theme.PaperElevated
 import com.example.flowtime.ui.theme.Primary
+import com.example.flowtime.ui.theme.SuccessGreen
 import com.example.flowtime.ui.theme.TextPrimary
 import com.example.flowtime.ui.theme.TextSecondary
 import java.time.Instant
@@ -175,6 +178,11 @@ fun RecordDivider() {
 
 /**
  * 删除 / 补录后的撤销条：贴在屏幕底部，[seconds] 秒内可反悔。
+ *
+ * 材质走主题 token（卡面 + 描边 + 柔和阴影 + 主题胶囊形状）——
+ * 之前写死「深墨底 + 白字」，夜航/涂鸦主题下 textPrimary 是近白，
+ * 整条变成一块大白板、白字直接看不见。
+ * 左侧语义点随 [accent] 变色：补录/恢复绿、删除琥珀。
  * 超时自动消失（调用方通过 [onExpire] 清理状态）。
  */
 @Composable
@@ -185,6 +193,7 @@ fun RecordUndoBar(
     modifier: Modifier = Modifier,
     message: String = "记录已删除",
     seconds: Int = 6,
+    accent: Color = SuccessGreen,
 ) {
     LaunchedEffect(visible) {
         if (visible) {
@@ -202,14 +211,23 @@ fun RecordUndoBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = Dimens.ScreenPadding, vertical = 12.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(TextPrimary.copy(alpha = 0.92f))
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .softShadow(ActivePalette.pillShape, elevation = 10.dp)
+                .clip(ActivePalette.pillShape)
+                .background(ActivePalette.surfaceCard)
+                .border(1.dp, ActivePalette.borderColor, ActivePalette.pillShape)
+                .padding(start = 16.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(message, fontSize = 13.sp, color = Color.White, modifier = Modifier.weight(1f))
+            Box(
+                Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(accent),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(message, fontSize = 13.sp, color = TextPrimary, modifier = Modifier.weight(1f))
             TextButton(onClick = onUndo) {
-                Text("撤销", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = CardGreenLight)
+                Text("撤销", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Primary)
             }
         }
     }

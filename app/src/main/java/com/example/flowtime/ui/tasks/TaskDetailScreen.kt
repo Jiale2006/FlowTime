@@ -393,6 +393,7 @@ fun TaskDetailScreen(
                 lastAdded != null -> "已补录 ${formatMinutesHm(lastAdded.minutes)}"
                 else -> "记录已删除"
             },
+            accent = if (lastAdded != null) SuccessGreen else WarningAmber,
             onUndo = {
                 deletedRecord?.let { viewModel.restoreRecord(it) }
                 lastAdded?.let { viewModel.deleteRecord(it.id) }
