@@ -1,25 +1,29 @@
 package com.example.flowtime.ui.records
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,7 +31,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -36,21 +39,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.flowtime.data.FocusRecord
+import com.example.flowtime.data.FocusTask
 import com.example.flowtime.data.RecordLink
 import com.example.flowtime.data.StatsRules
 import com.example.flowtime.ui.AppViewModel
-import com.example.flowtime.ui.components.BlurDialogBehind
-import com.example.flowtime.ui.components.DayQuickChip
 import com.example.flowtime.ui.components.ProCard
-import com.example.flowtime.ui.components.WheelColumn
-import com.example.flowtime.ui.components.WheelHeight
-import com.example.flowtime.ui.components.WheelSelectionBand
 import com.example.flowtime.ui.components.formatMinutesHm
 import com.example.flowtime.ui.theme.ActivePalette
+import com.example.flowtime.ui.theme.CardGreenLight
 import com.example.flowtime.ui.theme.Dimens
 import com.example.flowtime.ui.theme.PaperElevated
 import com.example.flowtime.ui.theme.Primary
@@ -65,12 +67,13 @@ import java.time.ZoneId
 /**
  * 记录页：跨任务的记录总览，倒序、按天分组。
  *
- * - 筛选收在右上角「筛选」里（任务名 + 时段），当前筛选状态显示在标题下面一行
- * - [initialTaskId] 非空 = 从任务详情进来：**默认只筛该任务**（含它的子任务），
- *   把搜索框清掉就能看全部任务
- * - 交互与任务详情页一致：长按删除（可撤销）、点按改时长（仅补录记录）
+ * 筛选采用 **Gmail search chips 模式**（调研结论 2026-10-10：维度少但某维要搜索时，
+ * 用「参数化 chip」而不是筛选弹层——M3 规范也认可 filter chip 的尾图标用于打开菜单）：
+ * - 「任务：X ▾」点开底部面板（搜索 + 单选，子任务缩进）；按 **id** 精确筛，
+ *   含它的直接子任务，与任务详情页口径一致
+ * - 「时段：X ▾」点开下拉（全部/上午/下午/晚上/深夜），按记录**结束小时**判定
+ * - 激活的非默认条件 chip 带 ×，点即清除；全部即时生效，无确认按钮（M3 chips 即时语义）
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AllRecordsScreen(
     viewModel: AppViewModel,
@@ -80,65 +83,23 @@ fun AllRecordsScreen(
     val records by viewModel.records.collectAsState()
     val tasks by viewModel.tasks.collectAsState()
     val zone = remember { ZoneId.systemDefault() }
-    val index = remember(tasks) { RecordLink.TaskIndex.of(tasks) }
 
-    // 任务筛选默认填入"我从哪个任务点进来的"——于是它天然就是"看这个任务的记录"。
-    // key 只挂 initialTaskId：挂上 tasks 的话，任务列表一变就会把用户敲的字冲掉。
-    var taskQuery by remember(initialTaskId) {
-        mutableStateOf(tasks.firstOrNull { it.id == initialTaskId }?.name.orEmpty())
-    }
+    var selectedTaskId by remember(initialTaskId) { mutableStateOf<String?>(initialTaskId) }
     var hourPreset by remember { mutableStateOf(StatsRules.HourPreset.ALL) }
-    var customWindow by remember { mutableStateOf<StatsRules.HourWindow?>(null) }
-    var sheetOpen by remember { mutableStateOf(false) }
+    var taskPickerOpen by remember { mutableStateOf(false) }
+    var hourMenuOpen by remember { mutableStateOf(false) }
     var editingRecord by remember { mutableStateOf<FocusRecord?>(null) }
     var deletedRecord by remember { mutableStateOf<FocusRecord?>(null) }
 
-    val query = taskQuery.trim()
-    // 命中"任务名含关键字"的任务；记录若属于**命中任务本身**或**命中任务的子任务**都算命中
-    // —— 所以搜「数学」能带出它下面「高数」「线代」的记录
-    val matchedTaskIds = remember(tasks, query) {
-        if (query.isBlank()) null
-        else tasks.filter { it.name.contains(query, ignoreCase = true) }.map { it.id }.toSet()
-    }
-    val hourWindow = remember(hourPreset, customWindow) { customWindow ?: hourPreset.window }
-
-    // 来源任务（从任务详情进来的那一个）。「看全部」之后必须还能一键切回来，
-    // 这条路径要可逆，所以任务名记在状态里，不靠用户再去搜索框里敲。
-    val sourceTaskName = remember(initialTaskId, tasks) {
-        tasks.firstOrNull { it.id == initialTaskId }?.name
-    }
-
-    val hitsTask: (FocusRecord) -> Boolean = { record ->
-        val matched = matchedTaskIds
-        if (matched == null) {
-            true
-        } else {
-            val owner = index.ownerOf(record)
-            when {
-                owner == null -> record.taskName.contains(query, ignoreCase = true)
-                owner.id in matched -> true
-                else -> owner.parentId?.let { it in matched } == true
-            }
-        }
-    }
-
-    val filtered = remember(records, matchedTaskIds, hourWindow, query) {
+    val filtered = remember(records, tasks, selectedTaskId, hourPreset) {
+        val task = tasks.firstOrNull { it.id == selectedTaskId }
+        val belongs = task?.let { RecordLink.treePredicate(it, tasks) } ?: { _: FocusRecord -> true }
         records
-            .filter { hitsTask(it) && StatsRules.inHourWindow(it, hourWindow, zone) }
+            .filter { belongs(it) && StatsRules.inHourWindow(it, hourPreset.window, zone) }
             .sortedByDescending { it.endEpochMillis }
     }
-    val filterActive = query.isNotBlank() || hourWindow != null
-
-    // 摊平成「日期头 + 记录行」的线性列表（LazyColumn 好消费）
-    val rows = remember(filtered, zone) {
-        val out = mutableListOf<RecordListItem>()
-        filtered
-            .groupBy { Instant.ofEpochMilli(it.endEpochMillis).atZone(zone).toLocalDate() }
-            .forEach { (date, list) ->
-                out += RecordListItem.DayHeader(date, list.sumOf { it.minutes })
-                list.forEach { out += RecordListItem.Entry(it) }
-            }
-        out
+    val selectedTask = remember(tasks, selectedTaskId) {
+        selectedTaskId?.let { id -> tasks.firstOrNull { it.id == id } }
     }
 
     Box(
@@ -160,64 +121,65 @@ fun AllRecordsScreen(
                     "全部记录",
                     style = MaterialTheme.typography.titleLarge,
                     color = TextPrimary,
-                    modifier = Modifier.weight(1f),
                 )
-                TextButton(onClick = { sheetOpen = true }) {
-                    Text(
-                        if (filterActive) "筛选 ·" else "筛选",
-                        fontSize = 13.sp,
-                        fontWeight = if (filterActive) FontWeight.Medium else FontWeight.Normal,
-                        color = Primary,
-                    )
-                }
             }
 
-            // 摘要行：说清"正在看什么"；按钮在「该任务 ↔ 全部」之间来回切换。
-            // 按钮写用户能得到什么（"看全部"/"看「数学」"），不写系统动作（"清空"）。
-            if (filterActive || sourceTaskName != null) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        buildString {
-                            append("正在看：")
-                            if (query.isNotBlank()) append("任务「$query」") else append("全部任务")
-                            hourWindow?.let {
-                                append(" · ")
-                                append(hourWindowText(it))
-                            }
-                            append(" · 共 ${filtered.size} 条")
-                        },
-                        fontSize = 12.sp,
-                        color = TextSecondary,
-                        modifier = Modifier.weight(1f),
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // 任务维度：选项多、要搜索 → 参数化 chip 打开选择面板
+                ParamChip(
+                    label = "任务：" + (selectedTask?.name ?: "全部"),
+                    active = selectedTask != null,
+                    onOpen = { taskPickerOpen = true },
+                    onClear = { selectedTaskId = null },
+                )
+                // 时段维度：固定 5 档互斥 → 参数化 chip 打开下拉
+                Box {
+                    ParamChip(
+                        label = "时段：" + hourPreset.label,
+                        active = hourPreset != StatsRules.HourPreset.ALL,
+                        onOpen = { hourMenuOpen = true },
+                        onClear = { hourPreset = StatsRules.HourPreset.ALL },
                     )
-                    if (sourceTaskName != null) {
-                        TextButton(
-                            onClick = {
-                                taskQuery = if (query.isNotBlank()) "" else sourceTaskName
-                            },
-                        ) {
-                            Text(
-                                if (query.isNotBlank()) "看全部" else "看「$sourceTaskName」",
-                                fontSize = 12.sp,
-                                color = Primary,
+                    DropdownMenu(
+                        expanded = hourMenuOpen,
+                        onDismissRequest = { hourMenuOpen = false },
+                    ) {
+                        StatsRules.HourPreset.entries.forEach { preset ->
+                            DropdownMenuItem(
+                                text = { Text(preset.label) },
+                                leadingIcon = {
+                                    if (hourPreset == preset) {
+                                        Icon(Icons.Default.Check, contentDescription = null, tint = Primary)
+                                    }
+                                },
+                                onClick = {
+                                    hourPreset = preset
+                                    hourMenuOpen = false
+                                },
                             )
                         }
                     }
                 }
-            } else {
-                Text(
-                    "${filtered.size} 条",
-                    fontSize = 12.sp,
-                    color = TextSecondary,
-                )
             }
+
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "${filtered.size} 条",
+                fontSize = 12.sp,
+                color = TextSecondary,
+            )
             Spacer(Modifier.height(8.dp))
 
-            if (rows.isEmpty()) {
+            if (filtered.isEmpty()) {
                 ProCard(modifier = Modifier.fillMaxWidth()) {
                     Box(Modifier.fillMaxWidth().padding(Dimens.CardPadding)) {
                         Text(
-                            if (filterActive) "当前筛选下没有记录，换个条件试试" else "还没有专注记录",
+                            if (selectedTask != null || hourPreset != StatsRules.HourPreset.ALL) {
+                                "当前筛选下没有记录，点 chip 上的 ✕ 放宽条件"
+                            } else {
+                                "还没有专注记录"
+                            },
                             fontSize = 13.sp,
                             color = TextPlaceholder,
                         )
@@ -225,13 +187,12 @@ fun AllRecordsScreen(
                 }
             } else {
                 LazyColumn(contentPadding = PaddingValues(bottom = Dimens.ListBottomGap)) {
-                    items(rows) { item ->
+                    items(recordsAsRows(filtered)) { item ->
                         when (item) {
                             is RecordListItem.DayHeader -> DayHeader(item)
                             is RecordListItem.Entry -> {
                                 RecordRow(
                                     record = item.record,
-                                    // 筛了任务名时在列表里标出任务，才分得清是哪条
                                     showTaskName = true,
                                     onEditDuration = { editingRecord = item.record },
                                     onDelete = {
@@ -259,24 +220,15 @@ fun AllRecordsScreen(
         )
     }
 
-    if (sheetOpen) {
-        FilterSheet(
-            taskQuery = taskQuery,
-            onTaskQueryChange = { taskQuery = it },
-            hourPreset = hourPreset,
-            customWindow = customWindow,
-            effectiveWindow = hourWindow,
-            onPickPreset = {
-                hourPreset = it
-                customWindow = null
+    if (taskPickerOpen) {
+        TaskPickerSheet(
+            tasks = tasks,
+            selectedTaskId = selectedTaskId,
+            onPick = { picked ->
+                selectedTaskId = picked
+                taskPickerOpen = false
             },
-            onCustomWindow = { customWindow = it },
-            onClear = {
-                taskQuery = ""
-                hourPreset = StatsRules.HourPreset.ALL
-                customWindow = null
-            },
-            onDismiss = { sheetOpen = false },
+            onDismiss = { taskPickerOpen = false },
         )
     }
 
@@ -292,125 +244,153 @@ fun AllRecordsScreen(
     }
 }
 
+private fun recordsAsRows(records: List<FocusRecord>): List<RecordListItem> {
+    val out = mutableListOf<RecordListItem>()
+    val zone = ZoneId.systemDefault()
+    records
+        .groupBy { Instant.ofEpochMilli(it.endEpochMillis).atZone(zone).toLocalDate() }
+        .forEach { (date, list) ->
+            out += RecordListItem.DayHeader(date, list.sumOf { it.minutes })
+            list.forEach { out += RecordListItem.Entry(it) }
+        }
+    return out
+}
+
 /**
- * 筛选面板：任务名搜索 + 时段（快捷档 / 自己拨起止小时）。
- * 改动**即时生效**（状态在页面上），关掉面板就能看到结果，所以只有一个「完成」按钮。
+ * 参数化筛选 chip：未激活 = 「任务：全部 ▾」描边态；激活 = 淡彩底 + 「✕」清除。
+ * 点主体打开选择器，点 ✕ 清除该条件 —— 两个独立点按区
+ * （M3：filter chip 的尾图标可用于打开菜单或移除，且清除要有独立触控区）。
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun FilterSheet(
-    taskQuery: String,
-    onTaskQueryChange: (String) -> Unit,
-    hourPreset: StatsRules.HourPreset,
-    customWindow: StatsRules.HourWindow?,
-    effectiveWindow: StatsRules.HourWindow?,
-    onPickPreset: (StatsRules.HourPreset) -> Unit,
-    onCustomWindow: (StatsRules.HourWindow) -> Unit,
+private fun ParamChip(
+    label: String,
+    active: Boolean,
+    onOpen: () -> Unit,
     onClear: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(ActivePalette.pillShape)
+            .background(if (active) CardGreenLight else Color.Transparent)
+            .border(
+                1.dp,
+                if (active) Color.Transparent else ActivePalette.borderColor,
+                ActivePalette.pillShape,
+            )
+            .clickable(onClick = onOpen)
+            .padding(start = 13.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            fontSize = 12.sp,
+            fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
+            color = if (active) Primary else TextSecondary,
+        )
+        if (active) {
+            Box(
+                Modifier
+                    .padding(start = 2.dp)
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onClear),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("✕", fontSize = 11.sp, color = Primary)
+            }
+        } else {
+            Text("▾", fontSize = 11.sp, color = TextSecondary, modifier = Modifier.padding(end = 4.dp))
+        }
+    }
+}
+
+/**
+ * 任务选择面板：搜索框 + 单选列表（顶层任务 → 缩进的子任务）。
+ * 「全部任务」排第一（= 清除任务筛选）。点选即关，无确认按钮。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TaskPickerSheet(
+    tasks: List<FocusTask>,
+    selectedTaskId: String?,
+    onPick: (String?) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    // 拨轮时以"当前生效的区间"为基点，没有就默认整天
-    val base = effectiveWindow ?: StatsRules.HourWindow(0, 23)
+    var query by remember { mutableStateOf("") }
+
+    // 无搜索时按「顶层 → 它的子任务」分组排列；搜索时命中即平铺
+    val ordered = remember(tasks, query) {
+        val q = query.trim()
+        if (q.isBlank()) {
+            tasks.filter { it.parentId == null }
+                .flatMap { top -> listOf(top) + tasks.filter { it.parentId == top.id } }
+        } else {
+            tasks.filter { it.name.contains(q, ignoreCase = true) }
+        }
+    }
 
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = PaperElevated) {
-        BlurDialogBehind(26.dp)
         Column(
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = Dimens.ScreenPadding)
                 .padding(bottom = Dimens.ListBottomGap),
         ) {
-            Text("筛选", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
-            Spacer(Modifier.height(14.dp))
-
-            Text("任务名称", fontSize = 12.sp, color = TextSecondary)
-            Spacer(Modifier.height(6.dp))
+            Text("选择任务", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+            Spacer(Modifier.height(10.dp))
             OutlinedTextField(
-                value = taskQuery,
-                onValueChange = onTaskQueryChange,
+                value = query,
+                onValueChange = { query = it },
                 singleLine = true,
-                placeholder = {
-                    Text("如「数学」，会连它的子任务一起带出来", fontSize = 13.sp, color = TextPlaceholder)
-                },
+                placeholder = { Text("搜索任务", fontSize = 13.sp, color = TextPlaceholder) },
                 modifier = Modifier.fillMaxWidth(),
                 shape = ActivePalette.tileShape,
             )
-
-            Spacer(Modifier.height(16.dp))
-            Text("时段", fontSize = 12.sp, color = TextSecondary)
             Spacer(Modifier.height(8.dp))
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                StatsRules.HourPreset.entries.forEach { preset ->
-                    DayQuickChip(
-                        label = preset.label,
-                        selected = customWindow == null && hourPreset == preset,
-                        onClick = { onPickPreset(preset) },
+            LazyColumn(Modifier.heightIn(max = 400.dp)) {
+                item {
+                    PickerRow(
+                        name = "全部任务",
+                        indent = false,
+                        selected = selectedTaskId == null,
+                        onClick = { onPick(null) },
                     )
                 }
-            }
-
-            Spacer(Modifier.height(14.dp))
-            Text(
-                if (customWindow == null) {
-                    "也可以自己拨起止小时（起 > 止 表示跨午夜）"
-                } else {
-                    "自定义：${hourWindowText(base)}"
-                },
-                fontSize = 11.sp,
-                color = TextPlaceholder,
-            )
-            Spacer(Modifier.height(6.dp))
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Box(Modifier.height(WheelHeight), contentAlignment = Alignment.Center) {
-                    WheelSelectionBand()
-                    HourWheel(base.startHour) { onCustomWindow(base.copy(startHour = it)) }
-                }
-                Text("→", fontSize = 14.sp, color = TextSecondary)
-                Box(Modifier.height(WheelHeight), contentAlignment = Alignment.Center) {
-                    WheelSelectionBand()
-                    HourWheel(base.endHour) { onCustomWindow(base.copy(endHour = it)) }
-                }
-            }
-
-            Spacer(Modifier.height(18.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                TextButton(onClick = onClear, modifier = Modifier.weight(1f)) {
-                    Text("清除条件", color = TextSecondary, fontSize = 14.sp)
-                }
-                Button(
-                    onClick = onDismiss,
-                    modifier = Modifier.weight(1f).height(Dimens.ButtonHeight),
-                    shape = ActivePalette.buttonShape,
-                    colors = ButtonDefaults.buttonColors(containerColor = Primary),
-                ) {
-                    Text("完成", fontSize = 15.sp)
+                items(ordered, key = { it.id }) { task ->
+                    PickerRow(
+                        name = task.name,
+                        indent = task.parentId != null,
+                        selected = selectedTaskId == task.id,
+                        onClick = { onPick(task.id) },
+                    )
                 }
             }
         }
     }
 }
 
-/** 单个小时滚轮（00–23） */
 @Composable
-private fun HourWheel(value: Int, onPick: (Int) -> Unit) {
-    val items = remember { (0..23).map { "%02d".format(it) } }
-    WheelColumn(
-        items = items,
-        selectedIndex = value.coerceIn(0, 23),
-        onIndexChange = onPick,
-        modifier = Modifier.width(72.dp),
-    )
+private fun PickerRow(name: String, indent: Boolean, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(ActivePalette.tileShape)
+            .clickable(onClick = onClick)
+            .padding(start = if (indent) 28.dp else 12.dp, end = 12.dp, top = 11.dp, bottom = 11.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            name,
+            fontSize = 14.sp,
+            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+            color = if (selected) Primary else TextPrimary,
+            modifier = Modifier.weight(1f),
+        )
+        if (selected) {
+            Icon(Icons.Default.Check, contentDescription = null, tint = Primary, modifier = Modifier.size(18.dp))
+        }
+    }
 }
-
-/** 小时区间文案：「22:00–02:00」 */
-private fun hourWindowText(window: StatsRules.HourWindow): String =
-    "%02d:00–%02d:00".format(window.startHour, window.endHour)
 
 private sealed interface RecordListItem {
     data class DayHeader(val date: LocalDate, val minutes: Int) : RecordListItem
