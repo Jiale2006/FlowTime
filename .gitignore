@@ -13,3 +13,10 @@ local.properties
 
 # 开发文档暂不入库（想提交就删掉这行）
 /doc/
+
+# 图标预览与截图临时产物
+svg/_preview.html
+svg/_preview.png
+svg/_zoom.html
+svg/_zoom.png
+shot.js
