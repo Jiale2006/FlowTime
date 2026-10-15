@@ -2,11 +2,7 @@ package com.example.flowtime.ui.components
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -21,13 +17,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
@@ -35,12 +26,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -57,7 +45,6 @@ import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.CardGreenLight
 import com.example.flowtime.ui.theme.Champagne
 import com.example.flowtime.ui.theme.ChampagneBright
-import com.example.flowtime.ui.theme.ErrorRed
 import com.example.flowtime.ui.theme.GlassBorder
 import com.example.flowtime.ui.theme.GlassBorderHigh
 import com.example.flowtime.ui.theme.GlassBottomShade
@@ -67,29 +54,23 @@ import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.PrimaryLight
 import com.example.flowtime.ui.theme.TextPrimary
 import com.example.flowtime.ui.theme.ThemeMode
-import com.example.flowtime.ui.theme.WarningAmber
 import com.example.flowtime.ui.theme.WatercolorInk
 import com.example.flowtime.ui.theme.WatercolorRose
-import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
-import kotlin.random.Random
 
 /**
- * 环形倒计时（教程 §3.1）：底色弧 + 渐变进度弧，圆角线帽，弧首圆点，中央大号时间。
+ * 环形倒计时（教程 §3.1）：底色弧 + 渐变进度弧，圆角线帽，弧首定位点，中央大号时间。
  *
- * 特效按当前主题分支，各有各的材质语言：
- * - 水彩画风：颜料随剩余时间流动（青绿→蓝灰→玫瑰警示）+ 补笔虚线渗色 + 边缘沉淀
- *   + 弧首湿点晕染（随机掉落晕染斑，像颜料滴进湿纸）；
- * - 玻璃拟态：月光钢蓝→香槟金（越紧迫越金亮）+ 镜面高光沿环缘缓慢扫过
- *   + 笔尖玻璃闪光（亮十字光斑）；
- * - 手绘涂鸦：蓝绿蜡笔→墨色→红笔警示 + 蜡笔颗粒纹理 + 笔尖弹出蜡笔屑
- *   + 手绘抖动圈涟漪（不是正圆）。
+ * 🔴 环区为**纯静态**绘制（用户要求"简洁"，2026-10-14 定）：整环光带 / 环境粒子 / 秒级涟漪 /
+ *    进度内流光 / 弧首彗尾 / 背景散点 / 刻度线 已全部移除。
+ *    保留的只是各主题的**静态材质差异**（如玻璃的管内液体光 + 镜面细线、水彩的补笔渗色）。
  *
- * 全部纯 Canvas 绘制（不用图层，防页面切换残影）；暂停即止，遵守液态缓动。
+ * 全部纯 Canvas 绘制（不用图层，防页面切换残影）。
+ * 🔴 已无帧驱动循环（原来那个 `while(true) + withFrameNanos` 随着笔尖粒子一起删了）——
+ *    环形区不再持续重绘，只在 progress 变化时重组。
  *
- * 动效节奏与时钟字形也随主题走：水彩=液态缓动（≥500ms ease-in-out）+ 衬线斜体数字；
- * 其余主题的节奏待各自提示词到位后单独调制。
+ * 主题字形差异：水彩 = 衬线斜体数字 + 水墨洇边；其余主题 = 直立衬线。
  */
 @Composable
 fun RingTimer(
@@ -98,11 +79,8 @@ fun RingTimer(
     modifier: Modifier = Modifier,
     strokeWidth: Dp = 14.dp,
     timeColor: Color = TextPrimary,
-    breathing: Boolean = false,
     /** 暂停态：整体降透明度，形成明确状态区分 */
     dimmed: Boolean = false,
-    /** 秒级涟漪：当前秒内进度 0..1，null 不绘制 */
-    rippleFraction: Float? = null,
     /**
      * 颜料色用的进度（0..1）。与 progress 分开：待机时几何上画满圈
      * （progress=1 作为"画布"），但颜料应显示起步色，而不是误判成"时间将尽"。
@@ -138,44 +116,9 @@ fun RingTimer(
     }
     val pigmentLight = lerp(pigmentBase, PrimaryLight, 0.45f)
 
-    // ---- 笔尖粒子池（帧驱动；暂停/结束即清空，像笔离开了纸）----
-    var blooms by remember { mutableStateOf(emptyList<HeadBloom>()) }
-    var frameNowMs by remember { mutableStateOf(0L) }
-    val latestProgress by rememberUpdatedState(pigmentProgress)
-    LaunchedEffect(breathing) {
-        if (!breathing) {
-            blooms = emptyList()
-            return@LaunchedEffect
-        }
-        val gapMul = when (ActivePalette.mode) {
-            ThemeMode.NOCTURNE -> 0.55f
-            ThemeMode.DOODLE -> 0.65f
-            else -> 1f
-        }
-        var lastSpawn = 0L
-        var nextGap = 1200L
-        while (true) {
-            withFrameNanos { nowNanos ->
-                val now = nowNanos / 1_000_000L
-                frameNowMs = now
-                if (now - lastSpawn >= nextGap) {
-                    val angle = Math.toRadians(-90.0 + 360.0 * latestProgress).toFloat()
-                    blooms = blooms + HeadBloom(now, angle, Random.nextInt())
-                    lastSpawn = now
-                    nextGap = ((2300L + Random.nextLong(1700L)) * gapMul).toLong()
-                }
-                val life = bloomLifetime(ActivePalette.mode)
-                if (blooms.isNotEmpty() && now - blooms.first().bornAtMillis > life) {
-                    blooms = blooms.filter { now - it.bornAtMillis <= life }
-                }
-            }
-        }
-    }
-
     Box(modifier = modifier.aspectRatio(1f), contentAlignment = Alignment.Center) {
-        if (breathing) {
-            RingGlow(strokePx = strokePx, tint = pigmentBase)
-        }
+        // 环区为纯静态绘制（用户要求简洁：光带 / 粒子 / 涟漪 / 流光 / 笔尖特效全部移除）：
+        // 只留 底色弧 + 进度弧 + 弧首定位点 + 中央时间。
         // 不再用 graphicsLayer 承载整体透明度：整块图层在页面切换时容易留下残影。
         // 改成把 ringAlpha 直接乘进每次绘制的颜色里 —— 视觉一致，但不需要图层。
         Canvas(modifier = Modifier.fillMaxSize()) {
@@ -186,72 +129,6 @@ fun RingTimer(
             val radius = arcSize.minDimension / 2
             val center = Offset(size.width / 2, size.height / 2)
             val doodle = mode == ThemeMode.DOODLE
-
-            // 秒级涟漪：每秒从环缘向外扩散一圈细波（涂鸦主题是手绘抖动圈）
-            rippleFraction?.let { fraction ->
-                val rippleColor = pigmentBase.copy(alpha = (1f - fraction) * 0.22f * ringA)
-                if (doodle) {
-                    val rippleR = radius + strokePx * (0.8f + 2.4f * fraction)
-                    val wob = Path()
-                    val steps = 30
-                    for (s in 0..steps) {
-                        val a = s / steps.toFloat() * 2f * PI.toFloat()
-                        val rr = rippleR + sin(a * 7f) * strokePx * 0.07f
-                        val x = center.x + rr * cos(a)
-                        val y = center.y + rr * sin(a)
-                        if (s == 0) wob.moveTo(x, y) else wob.lineTo(x, y)
-                    }
-                    wob.close()
-                    drawPath(wob, color = rippleColor, style = Stroke(strokePx * 0.12f, cap = StrokeCap.Round))
-                } else {
-                    drawCircle(
-                        color = rippleColor,
-                        radius = radius + strokePx * (0.8f + 2.4f * fraction),
-                        center = center,
-                        style = Stroke(width = strokePx * 0.14f),
-                    )
-                }
-            }
-
-            // 背景装饰点（示例图环形周围的散点）
-            val dotPositions = listOf(
-                0.12f to 0.08f, 0.86f to 0.12f, 0.95f to 0.42f, 0.90f to 0.78f,
-                0.08f to 0.34f, 0.05f to 0.72f, 0.30f to 0.94f, 0.70f to 0.95f,
-            )
-            dotPositions.forEachIndexed { index, (fx, fy) ->
-                drawCircle(
-                    color = if (index % 2 == 0) {
-                        AccentGreen.copy(alpha = 0.35f * ringA)
-                    } else if (mode == ThemeMode.NOCTURNE) {
-                        // 玻璃主题装饰点不上色：月光 + 白 15%
-                        GlassBorder.copy(alpha = ringA)
-                    } else {
-                        CardGreenLight.copy(alpha = ringA)
-                    },
-                    radius = strokePx * (if (index % 3 == 0) 0.30f else 0.18f),
-                    center = Offset(size.width * fx, size.height * fy),
-                )
-            }
-
-            // 刻度线（12 条，弱化）
-            for (i in 0 until 12) {
-                val angle = Math.toRadians((i * 30.0) - 90.0)
-                val outer = radius + strokePx * 0.9f
-                val inner = outer - strokePx * 0.55f
-                drawLine(
-                    color = AccentGreen.copy(alpha = 0.4f * ringA),
-                    start = Offset(
-                        center.x + (inner * cos(angle)).toFloat(),
-                        center.y + (inner * sin(angle)).toFloat(),
-                    ),
-                    end = Offset(
-                        center.x + (outer * cos(angle)).toFloat(),
-                        center.y + (outer * sin(angle)).toFloat(),
-                    ),
-                    strokeWidth = strokePx * 0.10f,
-                    cap = StrokeCap.Round,
-                )
-            }
 
             // 底色弧。玻璃拟态 = 无色空玻璃管：白 8% 管体 + 内外管壁细边 + 顶缘受光高光
             if (mode == ThemeMode.NOCTURNE) {
@@ -424,35 +301,6 @@ fun RingTimer(
                             alpha = 0.22f * ringA,
                             style = Stroke(width = strokePx * 0.12f, cap = StrokeCap.Round),
                         )
-                        // 扫光高光：沿环缘缓慢游走的白色反光带（借场景的光，非自身颜色）
-                        val phase = (frameNowMs % 9000L) / 9000f
-                        val sweepCenterDeg = -90f + 360f * phase
-                        drawArc(
-                            color = GlassBorderHigh,
-                            startAngle = sweepCenterDeg - 12f,
-                            sweepAngle = 24f,
-                            useCenter = false,
-                            topLeft = Offset(inset + strokePx * 0.12f, inset + strokePx * 0.12f),
-                            size = Size(
-                                size.width - (inset + strokePx * 0.12f) * 2,
-                                size.height - (inset + strokePx * 0.12f) * 2,
-                            ),
-                            alpha = 0.10f * ringA,
-                            style = Stroke(width = strokePx * 1.15f, cap = StrokeCap.Round),
-                        )
-                        drawArc(
-                            color = GlassBorderHigh,
-                            startAngle = sweepCenterDeg - 10f,
-                            sweepAngle = 20f,
-                            useCenter = false,
-                            topLeft = Offset(inset - strokePx * 0.08f, inset - strokePx * 0.08f),
-                            size = Size(
-                                size.width - (inset - strokePx * 0.08f) * 2,
-                                size.height - (inset - strokePx * 0.08f) * 2,
-                            ),
-                            alpha = 0.30f * ringA,
-                            style = Stroke(width = strokePx * 0.38f, cap = StrokeCap.Round),
-                        )
                     }
 
                     // 手绘涂鸦：两道短虚线叠出蜡笔颗粒（蜡笔的粗粝感）
@@ -500,15 +348,7 @@ fun RingTimer(
                     center.y + (radius * sin(headAngle)).toFloat(),
                 )
                 if (mode == ThemeMode.NOCTURNE) {
-                    // 液面前缘 = 香槟金游标（全环唯一香槟金定点）：光晕 + 指环 + 亮核。
-                    // 光晕 2s 缓脉动（frameNowMs 只在运行时推进 → 暂停/待机自然静止），
-                    // 环上唯一的活性动效，提示"液面正停在这里"（motion.md：有目的、克制）
-                    val haloPulse = if (breathing) 0.85f + 0.15f * sin(frameNowMs * 0.00314f) else 0.85f
-                    drawCircle(
-                        color = Champagne.copy(alpha = 0.16f * ringA),
-                        radius = strokePx * haloPulse,
-                        center = headCenter,
-                    )
+                    // 液面前缘 = 香槟金游标（全环唯一香槟金定点）：一圈细环 + 亮核，静态不动。
                     drawCircle(
                         color = Champagne.copy(alpha = 0.9f * ringA),
                         radius = strokePx * 0.46f,
@@ -532,40 +372,6 @@ fun RingTimer(
                             radius = strokePx * 0.48f,
                             center = headCenter + Offset(strokePx * 0.07f, strokePx * 0.06f),
                         )
-                    }
-                }
-                // 弧首彗尾：沿弧向后的渐隐拖尾，制造运动质感（玻璃主题用游标定点，不拖尾）
-                if (clamped > 0.02f && mode != ThemeMode.NOCTURNE) {
-                    for (k in 1..8) {
-                        val trailAngle = headAngle - k * 0.05
-                        drawCircle(
-                            color = pigmentBase.copy(alpha = (1f - k / 9f) * 0.28f * ringA),
-                            radius = strokePx * (0.5f - k * 0.04f),
-                            center = Offset(
-                                center.x + (radius * cos(trailAngle)).toFloat(),
-                                center.y + (radius * sin(trailAngle)).toFloat(),
-                            ),
-                        )
-                    }
-                }
-            }
-
-            // 笔尖粒子：水彩=湿点晕染 / 玻璃=闪光 / 涂鸦=蜡笔屑
-            if (blooms.isNotEmpty()) {
-                val now = frameNowMs
-                val life = bloomLifetime(mode).toFloat()
-                blooms.forEach { bloom ->
-                    val age = (now - bloom.bornAtMillis).coerceAtLeast(0L)
-                    val t = (age / life).coerceIn(0f, 1f)
-                    val appear = (t * 5f).coerceAtMost(1f)
-                    val fade = 1f - t
-                    val cx = center.x + (radius * cos(bloom.angleRad)).toFloat()
-                    val cy = center.y + (radius * sin(bloom.angleRad)).toFloat()
-                    val rnd = Random(bloom.seed)
-                    when (mode) {
-                        ThemeMode.NOCTURNE -> drawGlassGlint(cx, cy, t, fade, strokePx, rnd, ringA)
-                        ThemeMode.DOODLE -> drawCrayonSpecks(cx, cy, t, fade, strokePx, rnd, ringA)
-                        ThemeMode.WATERCOLOR -> drawWetBloom(cx, cy, t, appear, fade, strokePx, pigmentBase, rnd, ringA)
                     }
                 }
             }
@@ -675,147 +481,3 @@ private fun ClockText(
         color = color,
     )
 }
-
-/** 呼吸光环：环外围两层柔光随 6s 周期脉动（比正常呼吸慢一拍，进入减速曲线） */
-@Composable
-private fun RingGlow(strokePx: Float, tint: Color) {
-    val transition = rememberInfiniteTransition(label = "ringGlow")
-    val breath by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            tween(6000, easing = FastOutSlowInEasing),
-            RepeatMode.Reverse,
-        ),
-        label = "breath",
-    )
-    Canvas(Modifier.fillMaxSize()) {
-        val inset = strokePx / 2 + strokePx * 0.9f
-        val arcSize = Size(size.width - inset * 2, size.height - inset * 2)
-        val topLeft = Offset(inset, inset)
-        drawArc(
-            color = tint.copy(alpha = 0.10f + 0.10f * breath),
-            startAngle = 0f,
-            sweepAngle = 360f,
-            useCenter = false,
-            topLeft = topLeft,
-            size = arcSize,
-            style = Stroke(width = strokePx * (2.0f + 0.5f * breath), cap = StrokeCap.Round),
-        )
-        drawArc(
-            color = tint.copy(alpha = 0.05f + 0.07f * breath),
-            startAngle = 0f,
-            sweepAngle = 360f,
-            useCenter = false,
-            topLeft = topLeft,
-            size = arcSize,
-            style = Stroke(width = strokePx * (3.2f + 0.8f * breath), cap = StrokeCap.Round),
-        )
-    }
-}
-
-// ---- 笔尖粒子（按主题分支）------------------------------------------------
-
-/** 水彩：湿点晕染——几个错位圆叠成不规则晕染斑，先洇开再淡去 */
-private fun DrawScope.drawWetBloom(
-    cx: Float,
-    cy: Float,
-    t: Float,
-    appear: Float,
-    fade: Float,
-    strokePx: Float,
-    pigment: Color,
-    rnd: Random,
-    ringA: Float,
-) {
-    val bloomR = strokePx * (0.55f + 0.85f * (1f - (1f - t) * (1f - t)))
-    repeat(3) {
-        val off = strokePx * (0.22f + 0.20f * rnd.nextFloat())
-        val a = rnd.nextFloat() * 2f * PI.toFloat()
-        val rr = bloomR * (0.62f + 0.38f * rnd.nextFloat())
-        drawCircle(
-            color = pigment.copy(
-                alpha = 0.16f * fade * appear * (0.75f + 0.4f * rnd.nextFloat()) * ringA,
-            ),
-            radius = rr,
-            center = Offset(cx + off * cos(a), cy + off * sin(a)),
-        )
-    }
-}
-
-/** 玻璃拟态：玻璃闪光——亮心 + 十字光斑，快闪快灭 */
-private fun DrawScope.drawGlassGlint(
-    cx: Float,
-    cy: Float,
-    t: Float,
-    fade: Float,
-    strokePx: Float,
-    rnd: Random,
-    ringA: Float,
-) {
-    val glintColor = lerp(ChampagneBright, com.example.flowtime.ui.theme.Moonlight, rnd.nextFloat())
-    val drift = strokePx * 0.35f * easeOut(t)
-    val cx2 = cx + drift * (rnd.nextFloat() - 0.5f)
-    val cy2 = cy + drift * (rnd.nextFloat() - 0.5f)
-    drawCircle(
-        color = glintColor.copy(alpha = 0.55f * fade * ringA),
-        radius = strokePx * 0.22f,
-        center = Offset(cx2, cy2),
-    )
-    val len = strokePx * (0.45f + 0.35f * easeOut(t))
-    drawLine(
-        color = glintColor.copy(alpha = 0.38f * fade * ringA),
-        start = Offset(cx2 - len, cy2),
-        end = Offset(cx2 + len, cy2),
-        strokeWidth = 1.5f,
-        cap = StrokeCap.Round,
-    )
-    drawLine(
-        color = glintColor.copy(alpha = 0.38f * fade * ringA),
-        start = Offset(cx2, cy2 - len),
-        end = Offset(cx2, cy2 + len),
-        strokeWidth = 1.5f,
-        cap = StrokeCap.Round,
-    )
-}
-
-/** 手绘涂鸦：蜡笔屑——黄/红/蓝绿三色小方屑从笔尖四散弹出 */
-private fun DrawScope.drawCrayonSpecks(
-    cx: Float,
-    cy: Float,
-    t: Float,
-    fade: Float,
-    strokePx: Float,
-    rnd: Random,
-    ringA: Float,
-) {
-    val markerColors = listOf(AccentGreen, WarningAmber, ErrorRed)
-    repeat(5) {
-        val dir = rnd.nextFloat() * 2f * PI.toFloat()
-        val dist = strokePx * (0.25f + 0.55f * easeOut(t) * (0.5f + 0.5f * rnd.nextFloat()))
-        val side = strokePx * 0.16f * (1f - t * 0.4f)
-        val color = markerColors[rnd.nextInt(markerColors.size)]
-        rotate(degrees = rnd.nextFloat() * 90f, pivot = Offset(cx, cy)) {
-            drawRect(
-                color = color.copy(alpha = 0.55f * fade * ringA),
-                topLeft = Offset(cx + dist * cos(dir), cy + dist * sin(dir)),
-                size = Size(side, side),
-            )
-        }
-    }
-}
-
-private fun easeOut(t: Float) = 1f - (1f - t) * (1f - t)
-
-private fun bloomLifetime(mode: ThemeMode): Long = when (mode) {
-    ThemeMode.NOCTURNE -> 1600L
-    ThemeMode.DOODLE -> 2200L
-    ThemeMode.WATERCOLOR -> 3800L
-}
-
-/** 笔尖粒子：出生时间 + 笔尖角度 + 形状种子（同种子形状稳定不闪） */
-private data class HeadBloom(
-    val bornAtMillis: Long,
-    val angleRad: Float,
-    val seed: Int,
-)

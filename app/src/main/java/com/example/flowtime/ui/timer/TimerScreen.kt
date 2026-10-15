@@ -152,6 +152,28 @@ fun TimerScreen(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.TopCenter,
     ) {
+        // 环境漂浮粒子：**铺满整页**（挂在外层 Box 的第一个子元素 = 绘制在 Column 之前，
+        // 永远在 UI 之下）—— 所以任务卡/按钮会遮住一部分，是"背景浮尘"而不是"屏幕飞屑"，
+        // 不会干扰读数。水彩主题有自己的画（芦苇河），粒子层跳过它。
+        if (!isIdle && !reducedMotion && ActivePalette.mode != ThemeMode.WATERCOLOR) {
+            AmbientParticles(
+                state = ambient,
+                active = timer.phase == AppViewModel.TimerPhase.RUNNING,
+                modifier = Modifier.matchParentSize(),
+                // 整页铺开后面积约 ×2.5，数量按可见比例补到这里（不必等比例）
+                targetCount = 32,
+                // 🔴 禁区圆心纵向比例：圆环区在内容区约 38% 高度处（任务卡之下、按钮之上）。
+                //    不能沿用默认 0.5 —— 那是"画布中心"，全屏后已在屏幕正中，禁区会挖错位置。
+                keepOutCenterYFraction = 0.38f,
+                intensity = if (timer.mode != AppViewModel.TimerMode.COUNT_UP &&
+                    timer.remainingMillis in 1..5_000L
+                ) {
+                    1.6f
+                } else {
+                    1f
+                },
+            )
+        }
         Column(
             modifier = Modifier
                 .widthIn(max = Dimens.ContentMaxWidth)
@@ -270,11 +292,20 @@ fun TimerScreen(
             Spacer(Modifier.height(if (isIdle) 12.dp else 16.dp))
 
             // 圆环区吃掉剩余高度：小屏自动缩小，按钮始终在底部可见（无需滚动）
+            // 水彩主题是竖幅画（芦苇河 934×1685，宽高比 0.55），
+            // 若沿用 ringMaxSize 的横向口径卡高度，min(W/934, H/1685) 会以高度为瓶颈，
+            // 画作只占画布宽 ~44%、两侧各留白 ~110dp —— 竖幅画必须吃满纵向空间。
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .heightIn(max = ringMaxSize + 40.dp),
+                    .then(
+                        if (ActivePalette.mode == ThemeMode.WATERCOLOR) {
+                            Modifier
+                        } else {
+                            Modifier.heightIn(max = ringMaxSize + 40.dp)
+                        },
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
                 val displayMillis = when {
@@ -311,21 +342,6 @@ fun TimerScreen(
                         "番茄计时 · 第 ${timer.round} 轮专注"
                     else -> "倒计时"
                 }
-                if (!isIdle && !reducedMotion && ActivePalette.mode != ThemeMode.WATERCOLOR) {
-                    // 环境漂浮粒子：运行中上飘，最后 5 秒加速冲刺，暂停自然消散（圆环专属）
-                    AmbientParticles(
-                        state = ambient,
-                        active = timer.phase == AppViewModel.TimerPhase.RUNNING,
-                        modifier = Modifier.matchParentSize(),
-                        intensity = if (timer.mode != AppViewModel.TimerMode.COUNT_UP &&
-                            timer.remainingMillis in 1..5_000L
-                        ) {
-                            1.6f
-                        } else {
-                            1f
-                        },
-                    )
-                }
                 if (ActivePalette.mode == ThemeMode.WATERCOLOR) {
                     // 水彩主题：「芦苇河」画作显影（替代圆环）
                     // 风：显影走完（半程）后起风，吹的是全显的画
@@ -359,13 +375,7 @@ fun TimerScreen(
                         },
                         timeText = formatClock(displayMillis),
                     modifier = Modifier.fillMaxHeight(0.94f),
-                    breathing = timer.phase == AppViewModel.TimerPhase.RUNNING && !reducedMotion,
                     dimmed = timer.phase == AppViewModel.TimerPhase.PAUSED,
-                    rippleFraction = if (timer.phase == AppViewModel.TimerPhase.RUNNING && !reducedMotion) {
-                        (displayMillis % 1_000L) / 1_000f
-                    } else {
-                        null
-                    },
                     centerContent = if (!isIdle) {
                         {
                             Text(
