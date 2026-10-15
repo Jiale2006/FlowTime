@@ -28,9 +28,11 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -59,9 +61,6 @@ import com.example.flowtime.ui.theme.Moonlight
 import com.example.flowtime.ui.theme.MonoGray300
 import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.PrimaryLight
-import com.example.flowtime.ui.theme.SketchGraphite
-import com.example.flowtime.ui.theme.SketchGraphiteSoft
-import com.example.flowtime.ui.theme.SketchRed
 import com.example.flowtime.ui.theme.TextPrimary
 import com.example.flowtime.ui.theme.ThemeMode
 import com.example.flowtime.ui.theme.WatercolorInk
@@ -110,8 +109,6 @@ fun RingTimer(
         ThemeMode.WATERCOLOR, ThemeMode.NOCTURNE, ThemeMode.MONO -> 600
         // 现代渐变：Zero-Gravity Float 的 duration-500 + ease-out 节奏
         ThemeMode.GRADIENT -> 500
-        // 铅笔手绘：手绘反馈应「短促直接」（禁长时间平滑动画）
-        ThemeMode.SKETCH -> 180
         else -> 300
     }
     val ringAlpha by animateFloatAsState(
@@ -123,22 +120,17 @@ fun RingTimer(
     // ---- 颜料色：随剩余时间流动（颜料进度 0→1 即剩余时间 1→0）----
     val pigmentBase = run {
         val pigmentP = pigmentProgress.coerceIn(0f, 1f)
-        // 铅笔手绘的进度不是"调色板渐变"，而是铅笔由淡到浓再泛红：
-        // 起步浅石墨 → 走深变铅笔灰 → 临近末尾转低饱和红（规范允许的强调色之一）。
         // 现代渐变的进度就是它的招牌：紫 → 品红一路推过去。
         val settled = when (mode) {
-            ThemeMode.SKETCH ->
-                lerp(SketchGraphiteSoft, SketchGraphite, (pigmentP / 0.85f).coerceIn(0f, 1f))
             ThemeMode.GRADIENT ->
                 lerp(GradViolet, GradFuchsia, (pigmentP / 0.85f).coerceIn(0f, 1f))
             else -> lerp(AccentGreen, Primary, (pigmentP / 0.85f).coerceIn(0f, 1f))
         }
         val urgent = ((pigmentP - 0.88f) / 0.12f).coerceIn(0f, 1f)
-        // 玻璃拟态的紧迫色是"更亮的香槟"（唯一强调色）；铅笔手绘用低饱和红；
+        // 玻璃拟态的紧迫色是"更亮的香槟"（唯一强调色）；
         // 现代渐变收进青（补全 violet→fuchsia→cyan 三色收束）；水彩/涂鸦用玫瑰/红笔
         val urgentColor = when (mode) {
             ThemeMode.NOCTURNE -> ChampagneBright
-            ThemeMode.SKETCH -> SketchRed
             ThemeMode.GRADIENT -> GradCyan
             else -> WatercolorRose
         }
@@ -191,24 +183,6 @@ fun RingTimer(
                         size.height - (inset - strokePx * 0.5f) * 2,
                     ),
                     style = Stroke(width = strokePx * 0.14f, cap = StrokeCap.Round),
-                )
-            } else if (mode == ThemeMode.SKETCH) {
-                // 铅笔手绘底色环 = 一道铅笔虚线（规范「边框使用不规则风格 border-dashed」）。
-                // 底环刻意不画实线：断笔感让"手描一圈"的手工味出来，也避免出现"完美圆"。
-                drawArc(
-                    color = SketchGraphite.copy(alpha = 0.34f * ringA),
-                    startAngle = 0f,
-                    sweepAngle = 360f,
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = arcSize,
-                    style = Stroke(
-                        width = strokePx * 0.55f,
-                        cap = StrokeCap.Round,
-                        pathEffect = PathEffect.dashPathEffect(
-                            floatArrayOf(strokePx * 1.15f, strokePx * 0.95f),
-                        ),
-                    ),
                 )
             } else if (mode == ThemeMode.GRADIENT) {
                 // 现代渐变底色环 = 白 10% 玻璃管（规范卡片 glass 语言在环上的延续）：
@@ -416,27 +390,6 @@ fun RingTimer(
                         )
                     }
 
-                    // 铅笔手绘：在石墨灰主笔触之上再落一道断笔虚线「重描」——
-                    // 像用铅笔沿弧又划了一遍，笔触接不齐正是手绘的证据（规范「保留笔触粗糙感」）
-                    ThemeMode.SKETCH -> {
-                        drawArc(
-                            color = SketchGraphite,
-                            startAngle = -90f,
-                            sweepAngle = sweep,
-                            useCenter = false,
-                            topLeft = topLeft,
-                            size = arcSize,
-                            alpha = 0.40f * ringA,
-                            style = Stroke(
-                                width = strokePx * 0.28f,
-                                cap = StrokeCap.Round,
-                                pathEffect = PathEffect.dashPathEffect(
-                                    floatArrayOf(strokePx * 3.0f, strokePx * 1.1f),
-                                ),
-                            ),
-                        )
-                    }
-
                     // 现代渐变：紫→品红→青的三色 sweep 渐变（规范 COLOR COMBO
                     // 「from-violet-500 via-fuchsia-500 to-cyan-500」）+ 贴内缘一道白色受光高光
                     ThemeMode.GRADIENT -> {
@@ -506,8 +459,8 @@ fun RingTimer(
                         radius = strokePx * 0.52f,
                         center = headCenter,
                     )
-                    if (doodle || mode == ThemeMode.SKETCH) {
-                        // 手绘主题的弧首补一个错位的"重描"点，像画了两笔
+                    if (doodle) {
+                        // 涂鸦弧首补一个错位的"重描"点，像画了两笔
                         drawCircle(
                             color = pigmentBase.copy(alpha = 0.35f * ringA),
                             radius = strokePx * 0.48f,
@@ -527,8 +480,6 @@ fun RingTimer(
                 ThemeMode.NOCTURNE -> 250
                 // 单色极简：Deliberate Slowness（等宽数字等宽，交叉淡化不会错位）
                 ThemeMode.MONO -> 500
-                // 铅笔手绘：手绘反馈短促直接，跳秒一闪即过
-                ThemeMode.SKETCH -> 90
                 // 现代渐变：transition-all duration-300 的节奏
                 ThemeMode.GRADIENT -> 300
                 else -> 120
@@ -547,8 +498,8 @@ fun RingTimer(
                         ThemeMode.GRADIENT -> FontFamily.SansSerif
                         else -> FontFamily.Serif
                     },
-                    // 水彩 / 铅笔手绘走衬线斜体（两份规范的自检项都点了"衬线斜体"）
-                    fontStyle = if (mode == ThemeMode.WATERCOLOR || mode == ThemeMode.SKETCH) {
+                    // 水彩走衬线斜体（规范的自检项点了"衬线斜体"）
+                    fontStyle = if (mode == ThemeMode.WATERCOLOR) {
                         FontStyle.Italic
                     } else {
                         FontStyle.Normal
@@ -604,8 +555,7 @@ fun RingTimer(
                         ClockText(
                             text = text,
                             color = timeColor,
-                            // 铅笔手绘数字走衬线斜体（手绘感），其余主题正体
-                            italic = mode == ThemeMode.SKETCH,
+                            italic = false,
                             fontFamily = when (mode) {
                                 ThemeMode.MONO -> FontFamily.Monospace
                                 ThemeMode.GRADIENT -> FontFamily.SansSerif
@@ -635,6 +585,11 @@ fun RingTimer(
  *
  * gradientBrush 非空时改走"渐变文字"：先正常画字，再叠一层 SrcIn 的渐变矩形
  * （用文字当 alpha 遮罩切出渐变），是跨版本都成立的经典做法。
+ *
+ * 🔴 **混合模式必须配 Offscreen 图层**：`BlendMode.SrcIn` 是拿目标像素的 alpha 做乘法，
+ * 若在父图层里直接画，这个矩形会把**它盖住区域里画面原有的像素一起改写**
+ * （表现为数字处闪出一块渐变色、把数字和身后内容糊住）。加一层
+ * `CompositingStrategy.Offscreen` 后，该混合只在数字自己这层内生效。
  */
 @Composable
 private fun ClockText(
@@ -648,10 +603,12 @@ private fun ClockText(
     val finalModifier = if (gradientBrush == null) {
         modifier
     } else {
-        modifier.drawWithContent {
-            drawContent()
-            drawRect(brush = gradientBrush, blendMode = BlendMode.SrcIn)
-        }
+        modifier
+            .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+            .drawWithContent {
+                drawContent()
+                drawRect(brush = gradientBrush, blendMode = BlendMode.SrcIn)
+            }
     }
     Text(
         text = text,

@@ -91,7 +91,6 @@ import com.example.flowtime.ui.theme.MutedSurface
 import com.example.flowtime.ui.theme.OnChampagne
 import com.example.flowtime.ui.theme.PaperElevated
 import com.example.flowtime.ui.theme.Primary
-import com.example.flowtime.ui.theme.SketchPaper
 import com.example.flowtime.ui.theme.SurfaceCard
 import com.example.flowtime.ui.theme.TaskCardPalette
 import com.example.flowtime.ui.theme.TextPrimary
@@ -426,8 +425,6 @@ fun TimerScreen(
                         Text(
                             text = if (timer.phase == AppViewModel.TimerPhase.RUNNING) "暂停" else "继续",
                             color = when (ActivePalette.mode) {
-                                // 铅笔手绘主按钮是石墨底，用纸张色字（规范按钮 token：深底 + 纸色字）
-                                ThemeMode.SKETCH -> SketchPaper
                                 ThemeMode.NOCTURNE -> OnChampagne
                                 else -> Color.White
                             },
@@ -780,8 +777,7 @@ fun TimerScreen(
                         // 与任务清单一致：只有归属大类的任务才挂标签，未分类不再显示
                         val parentName = tasks.firstOrNull { it.id == item.parentId }?.name
                         if (parentName != null) {
-                            // 铅笔手绘主题下徽章轻微倾斜（规范「元素保留轻微倾斜」）
-                            CategoryBadge(categoryName = parentName, tilt = true)
+                            CategoryBadge(categoryName = parentName)
                         }
                     }
                 }
