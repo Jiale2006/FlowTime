@@ -1,0 +1,83 @@
+/* ============================================================
+   FlowTime Metrics · Design Tokens
+   方向：工业实用 Industrial / Utilitarian
+   主色 60% 暖近黑 · 辅助 30% 次级表面 · 强调 10% 琥珀
+   ============================================================ */
+:root {
+  /* —— 表面 —— */
+  --bg:            #141210;   /* 页面底 */
+  --surface:       #1c1917;   /* 卡片 */
+  --surface-2:     #242019;   /* 次级表面 / 悬停 */
+  --surface-3:     #2e2822;   /* 高亮表面 */
+
+  /* —— 文字 —— */
+  --text:          #f4efe7;   /* 暖近白，非纯白 */
+  --text-dim:      #b3aa9c;
+  --muted:         #8b8375;
+
+  /* —— 线 —— */
+  --hair:          rgba(244, 239, 231, 0.13);
+  --hair-2:        rgba(244, 239, 231, 0.07);
+
+  /* —— 单一强调色：琥珀 —— */
+  --accent:        #ff8a3d;
+  --accent-dim:    rgba(255, 138, 61, 0.14);
+  --accent-line:   rgba(255, 138, 61, 0.42);
+
+  /* —— 状态色（数据编码，仅用于所属主题）—— */
+  --c-goal:        #ff8a3d;
+  --c-review:      #8f82f5;
+  --c-sport:       #33c48d;
+  --c-read:        #3e8cf0;
+  --c-en:          #f0623e;
+  --c-math:        #a78bfa;
+  --c-major:       #22b8cf;
+  --c-politics:    #e0534c;
+  --c-study:       #3b82f6;
+  --c-reflect:     #9d74f8;
+  --c-code:        #2f9e6e;
+  --c-shop:        #e8497f;
+  --c-film:        #b06ef8;
+  --c-food:        #f0a02a;
+  --c-hike:        #4fae3f;
+  --c-walk:        #2aa8a0;
+
+  /* —— 字阶（1.25 模块化比例）—— */
+  --fs-micro:      9px;
+  --fs-xs:         10px;
+  --fs-sm:         11.5px;
+  --fs-base:       13px;
+  --fs-md:         15px;
+  --fs-lg:         20px;
+  --fs-xl:         27px;
+  --fs-2xl:        38px;
+  --fs-3xl:        64px;
+  --fs-display:    96px;
+
+  /* —— 字族 —— */
+  --font-display:  "Space Mono", "JetBrains Mono", Consolas, monospace;
+  --font-body:     "IBM Plex Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono:     "Space Mono", "JetBrains Mono", Consolas, ui-monospace, monospace;
+
+  /* —— 间距梯度 —— */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 14px; --sp-4: 22px;
+  --sp-5: 36px; --sp-6: 58px; --sp-7: 92px;
+
+  /* —— 圆角（工业风：克制）—— */
+  --r-sm: 2px; --r-md: 4px; --r-lg: 8px;
+
+  /* —— 阴影（带环境色，非纯黑）—— */
+  --sh-1: 0 2px 8px rgba(8, 6, 5, 0.42);
+  --sh-2: 0 8px 28px rgba(8, 6, 5, 0.52);
+  --sh-3: 0 24px 64px rgba(8, 6, 5, 0.62);
+  --sh-glow: 0 0 0 1px var(--accent-line), 0 12px 40px rgba(255, 138, 61, 0.16);
+
+  /* —— 动效 —— */
+  --ease-out:  cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in:   cubic-bezier(0.7, 0, 0.84, 0);
+  --dur-fast:  160ms;
+  --dur-base:  320ms;
+  --dur-slow:  640ms;
+}
+
+/* 暗色是唯一主题 —— 工业仪表盘的默认语境，不做明色翻转 */
