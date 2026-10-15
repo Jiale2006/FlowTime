@@ -98,7 +98,7 @@ fun ProCard(
                 Box { content() }
             }
         }
-        ThemeMode.WATERCOLOR, ThemeMode.MONO, ThemeMode.INKWASH -> {
+        ThemeMode.WATERCOLOR, ThemeMode.MONO -> {
             // 浅色纸面通用材质：实心底 + 细描边 + 扩散阴影。
             // 阴影强度由各自调色板的 shadowAmbient/SpotAlpha 决定
             // （水彩柔和、单色/水墨几乎不可见）。
