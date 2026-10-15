@@ -13,12 +13,12 @@ import androidx.compose.ui.unit.dp
 // ── 多主题体系 ─────────────────────────────────────────────────
 // 全站界面只引用本文件的 token（BgPrimary、Primary……），token 是
 // 「当前调色板 ActivePalette」的读取器；设置页切换主题时整体换装。
-// 三套主题：水彩画风 / 玻璃拟态 / 手绘涂鸦。
+// 三套起步主题：水彩画风 / 玻璃拟态 / 手绘涂鸦；后追加单色极简、水墨画风，共五套。
 // 形状与装饰也属于主题语言（卡片圆角、胶囊 chip、虚线边框、横幅笔刷），
 // 一并放进 AppPalette，组件里不允许再写死 RoundedCornerShape。
 
 /** 可切换的主题模式 */
-enum class ThemeMode { WATERCOLOR, NOCTURNE, DOODLE }
+enum class ThemeMode { WATERCOLOR, NOCTURNE, DOODLE, MONO, INKWASH }
 
 /** 一套主题的全部 token：颜色 + 形状 + 装饰 */
 interface AppPalette {
@@ -331,8 +331,170 @@ object DoodlePalette : AppPalette {
     override val bannerBrush = SolidColor(primary)         // 禁渐变：扁平墨色横幅
 }
 
+// ── 单色极简 / Monochrome（第四版）──────────────────────────────
+// 提示词：风格提示词/单色极简.md。规则：只用灰阶九色（#111~#fff，禁一切色相）；
+// 直角~2dp 小圆角（禁 rounded-full）；禁渐变、禁重阴影（shadow-sm 上限）；
+// 层次靠字重对比（标题 bold tracking-tight / 正文 light）与大量负空间。
+
+/** 灰阶九色（提示词给定的全部合法色；仅单色场景与调色板使用） */
+val MonoInk = Color(0xFF111111)
+val MonoGray900 = Color(0xFF333333)
+val MonoGray700 = Color(0xFF666666)
+val MonoGray500 = Color(0xFF999999)
+val MonoGray300 = Color(0xFFCCCCCC)
+val MonoGray200 = Color(0xFFE5E5E5)
+val MonoGray100 = Color(0xFFF5F5F5)
+val MonoPaper = Color(0xFFFAFAFA)
+
+object MonoPalette : AppPalette {
+    override val mode = ThemeMode.MONO
+    override val label = "单色极简"
+    override val tagline = "黑白灰 · 字重层次"
+    override val previewDots = listOf(MonoPaper, MonoInk, MonoGray300)
+
+    override val bgPrimary = MonoPaper
+    override val primary = MonoInk                        // 主按钮 = 墨黑底 + 纸色字
+    override val primaryDark = MonoGray900
+    override val primaryLight = MonoGray700
+    override val accentGreen = MonoGray700                // 语义槽位全部退化为灰阶
+    override val cardGreenLight = MonoGray200             // 选中态 = 浅灰底（不靠色相区分）
+    override val cardOrange = MonoGray100
+    override val cardCream = MonoGray100
+    override val mutedSurface = MonoGray100
+    override val gold = MonoGray700
+    override val textPrimary = MonoInk
+    override val textSecondary = MonoGray700
+    override val textPlaceholder = MonoGray500
+    override val dividerColor = MonoGray200               // 极细边框分隔 #e5e5e5
+    override val borderColor = MonoGray200
+    override val surfaceCard = Color.White
+    override val dialogContainer = Color.White
+    // 状态色也必须无色相：用灰阶深浅 + 文案表达语义（提示词的硬约束）
+    override val errorRed = MonoInk
+    override val warningAmber = MonoGray700
+    override val successGreen = MonoGray900
+    override val disabledGray = MonoGray300
+    override val taskCardPalette = listOf(
+        MonoGray100 to MonoInk,           // 浅灰
+        MonoGray200 to MonoInk,           // 灰
+        Color.White to MonoInk,           // 纸白（靠描边区分底色）
+        MonoGray300 to MonoInk,           // 中浅灰
+        MonoGray500 to MonoInk,           // 中灰（对比度 ≈6:1）
+        MonoGray700 to MonoPaper,         // 深灰（浅字 ≈5.4:1）
+        MonoGray900 to MonoPaper,         // 近黑
+        MonoInk to MonoPaper,             // 墨卡
+        MonoGray200 to MonoGray900,       // 灰（深字变化）
+        MonoGray100 to MonoGray700,
+        MonoGray300 to MonoGray900,
+        Color.White to MonoGray700,
+        MonoGray500 to Color.White,       // 中灰（白字 ≈3.9:1，大号图标语义可接受）
+        MonoGray700 to Color.White,
+        MonoGray900 to MonoGray200,
+        MonoInk to MonoGray300,
+    )
+    override val navContainer = MonoPaper
+    override val navItemUnselected = MonoGray500
+    override val shadowInk = MonoInk                      // 阴影近乎不可见（shadow-sm 上限）
+    override val shadowAmbientAlpha = 0.08f
+    override val shadowSpotAlpha = 0.06f
+    override val ink = MonoInk
+    override val peach = MonoGray700
+    override val teal = MonoGray500
+    override val rose = MonoGray900
+    override val sand = MonoGray300
+
+    override val cardShape = RoundedCornerShape(2.dp)     // rounded-sm
+    override val tileShape = RoundedCornerShape(2.dp)
+    override val badgeShape = RoundedCornerShape(2.dp)
+    override val buttonShape = RoundedCornerShape(2.dp)
+    override val pillShape = RoundedCornerShape(2.dp)     // 禁 rounded-full：胶囊退化为小圆角
+    override val dashedBorders = false
+    override val bannerBrush = SolidColor(primary)        // 禁渐变：扁平墨色横幅
+}
+
+// ── 水墨画风 / Ink Wash（第五版）────────────────────────────────
+// 提示词：风格提示词/水墨画风.md。规则：宣纸暖底 + 墨色文字 + 苔绿/茶棕/沙三点缀；
+// 禁饱和色、禁重阴影、禁渐变（横幅走纯色）、禁粗边框（墨 20% 细线）；
+// 层次靠墨色浓淡（墨分五色：焦浓重淡清）与大量留白；形状 2dp 微圆角。
+
+/** 水墨场景色（墨分五色取三档 + 一点胭脂；仅水墨场景层与计时环共用） */
+val InkNong = Color(0xFF2C2C2C)      // 浓墨（主文字/主笔触）
+val InkQing = Color(0xFF8E8C84)      // 清墨（淡笔/底稿）
+val InkYanzhi = Color(0xFFA97070)    // 胭脂（紧迫提示，印章红降饱和）
+val PaperXuan = Color(0xFFF8F5F0)    // 宣纸
+val PaperXuanSoft = Color(0xFFF3EFE8) // 辅宣纸
+val MossGreen = Color(0xFF6B7B6E)    // 苔绿
+val TeaBrown = Color(0xFFA89279)     // 茶棕
+val SandInk = Color(0xFFC4B9A8)      // 沙色
+
+object InkwashPalette : AppPalette {
+    override val mode = ThemeMode.INKWASH
+    override val label = "水墨画风"
+    override val tagline = "宣纸 · 墨分五色"
+    override val previewDots = listOf(PaperXuan, InkNong, MossGreen)
+
+    override val bgPrimary = PaperXuan
+    override val primary = InkNong                        // 主按钮 = 焦墨底 + 宣纸字
+    override val primaryDark = Color(0xFF1E1E1C)
+    override val primaryLight = Color(0xFFA9A79D)         // 清墨（禁饱和高光色）
+    override val accentGreen = MossGreen                  // 语义绿 = 苔绿（天然匹配）
+    override val cardGreenLight = Color(0xFFE9ECE6)       // 苔绿染纸（选中态）
+    override val cardOrange = Color(0xFFEFE8DD)           // 茶棕染纸
+    override val cardCream = PaperXuanSoft
+    override val mutedSurface = PaperXuanSoft
+    override val gold = TeaBrown
+    override val textPrimary = InkNong
+    override val textSecondary = Color(0xA62C2C2C)        // 墨 65%
+    override val textPlaceholder = Color(0x732C2C2C)      // 墨 45%
+    override val dividerColor = Color(0x332C2C2C)         // 墨 20%：风格规范 border-[#2c2c2c]/20
+    override val borderColor = Color(0x332C2C2C)
+    override val surfaceCard = Color(0xFFFBF9F3)          // 略提亮的纸面
+    override val dialogContainer = Color(0xFFFBF9F3)
+    override val errorRed = InkYanzhi                     // 胭脂（禁饱和红）
+    override val warningAmber = TeaBrown
+    override val successGreen = MossGreen
+    override val disabledGray = SandInk
+    override val taskCardPalette = listOf(
+        Color(0xFFECE8DE) to InkNong,     // 淡茶纸
+        Color(0xFFE9ECE6) to InkNong,     // 苔绿染
+        Color(0xFFEFE8DD) to InkNong,     // 茶棕染
+        Color(0xFFE2DCCF) to InkNong,     // 沙色
+        PaperXuanSoft to InkNong,         // 辅宣纸
+        Color(0xFFE4E4DC) to InkNong,     // 淡墨
+        Color(0xFFD8D5C8) to InkNong,     // 陈纸
+        Color(0xFFDFE5E0) to InkNong,     // 青灰
+        Color(0xFFC4B9A8) to InkNong,     // 沙色正
+        InkNong to PaperXuan,             // 焦墨（纸色字）
+        Color(0xFF4A554C) to PaperXuan,   // 深苔
+        Color(0xFF6E5F50) to PaperXuan,   // 深茶
+        Color(0xFF55524A) to PaperXuan,   // 浓墨灰
+        Color(0xFF5C6857) to PaperXuan,   // 苔浓
+        Color(0xFF3E4A44) to PaperXuan,   // 墨绿
+        Color(0xFF33332F) to PaperXuan,   // 重墨
+    )
+    override val navContainer = Color(0xFFFBF9F3)
+    override val navItemUnselected = Color(0x732C2C2C)
+    override val shadowInk = InkNong
+    override val shadowAmbientAlpha = 0.10f               // 禁重阴影：淡到几乎不可见
+    override val shadowSpotAlpha = 0.08f
+    override val ink = InkNong
+    override val peach = TeaBrown
+    override val teal = MossGreen
+    override val rose = InkYanzhi
+    override val sand = SandInk
+
+    override val cardShape = RoundedCornerShape(2.dp)     // rounded-none 的 2dp 折衷
+    override val tileShape = RoundedCornerShape(2.dp)
+    override val badgeShape = RoundedCornerShape(2.dp)
+    override val buttonShape = RoundedCornerShape(2.dp)
+    override val pillShape = RoundedCornerShape(2.dp)     // 禁 rounded-full：胶囊退化为微圆角
+    override val dashedBorders = false
+    override val bannerBrush = SolidColor(primary)        // 禁渐变：扁平焦墨横幅
+}
+
 /** 全部主题（选择界面按此顺序展示） */
-val AllPalettes: List<AppPalette> = listOf(WatercolorPalette, NocturnePalette, DoodlePalette)
+val AllPalettes: List<AppPalette> =
+    listOf(WatercolorPalette, NocturnePalette, DoodlePalette, MonoPalette, InkwashPalette)
 
 /** 当前生效的调色板（快照状态：切换后所有读取它的组合范围自动重组） */
 var ActivePalette: AppPalette by mutableStateOf(NocturnePalette)
@@ -342,6 +504,8 @@ fun paletteFor(mode: ThemeMode): AppPalette =
         ThemeMode.WATERCOLOR -> WatercolorPalette
         ThemeMode.NOCTURNE -> NocturnePalette
         ThemeMode.DOODLE -> DoodlePalette
+        ThemeMode.MONO -> MonoPalette
+        ThemeMode.INKWASH -> InkwashPalette
     }
 
 // ── 全站 token（读取 ActivePalette，调用点无需感知主题切换）──────

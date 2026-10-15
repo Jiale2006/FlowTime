@@ -38,6 +38,8 @@ fun FlowTimeTheme(
         ThemeMode.NOCTURNE -> nocturneScheme(palette)
         ThemeMode.DOODLE -> doodleScheme(palette)
         ThemeMode.WATERCOLOR -> watercolorScheme(palette)
+        ThemeMode.MONO -> monoScheme(palette)
+        ThemeMode.INKWASH -> inkwashScheme(palette)
     }
     SceneSystemBarsEffect(palette)
     MaterialTheme(
@@ -114,6 +116,48 @@ private fun doodleScheme(p: AppPalette) = lightColorScheme(
     onSurfaceVariant = p.textSecondary,
     outline = p.dividerColor,
     outlineVariant = p.dividerColor,
+    error = p.errorRed,
+)
+
+/** 单色极简（#fafafa 纸底；墨黑主按钮 + 全灰阶语义色，零色相）*/
+private fun monoScheme(p: AppPalette) = lightColorScheme(
+    primary = p.primary,
+    onPrimary = MonoPaper,
+    primaryContainer = p.cardGreenLight,
+    onPrimaryContainer = p.textPrimary,
+    secondary = p.accentGreen,
+    onSecondary = MonoPaper,
+    tertiary = p.gold,
+    onTertiary = MonoPaper,
+    background = p.bgPrimary,
+    onBackground = p.textPrimary,
+    surface = p.surfaceCard,
+    onSurface = p.textPrimary,
+    surfaceVariant = p.cardCream,
+    onSurfaceVariant = p.textSecondary,
+    outline = p.dividerColor,
+    outlineVariant = p.borderColor,
+    error = p.errorRed,
+)
+
+/** 水墨画风（宣纸底；焦墨主按钮 + 苔绿/茶棕点缀，禁饱和色）*/
+private fun inkwashScheme(p: AppPalette) = lightColorScheme(
+    primary = p.primary,
+    onPrimary = PaperXuan,
+    primaryContainer = p.cardGreenLight,
+    onPrimaryContainer = p.textPrimary,
+    secondary = p.accentGreen,
+    onSecondary = PaperXuan,
+    tertiary = p.gold,
+    onTertiary = PaperXuan,
+    background = p.bgPrimary,
+    onBackground = p.textPrimary,
+    surface = p.surfaceCard,
+    onSurface = p.textPrimary,
+    surfaceVariant = p.cardCream,
+    onSurfaceVariant = p.textSecondary,
+    outline = p.dividerColor,
+    outlineVariant = p.borderColor,
     error = p.errorRed,
 )
 
@@ -202,6 +246,94 @@ private fun typographyFor(mode: ThemeMode): Typography = when (mode) {
             lineHeight = 18.sp,
         ),
     )
+    // 单色极简：标题 bold + 紧字距（tracking-tight），正文 light，
+    // 小字/标签加宽字距（tracking-wider）——层次全靠字重与字距，不靠颜色
+    ThemeMode.MONO -> Typography(
+        headlineLarge = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold,
+            fontSize = 28.sp, lineHeight = 34.sp, letterSpacing = (-0.5).sp,
+        ),
+        headlineMedium = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold,
+            fontSize = 24.sp, lineHeight = 30.sp, letterSpacing = (-0.5).sp,
+        ),
+        headlineSmall = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold,
+            fontSize = 20.sp, lineHeight = 26.sp, letterSpacing = (-0.25).sp,
+        ),
+        titleLarge = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold,
+            fontSize = 20.sp, lineHeight = 26.sp, letterSpacing = (-0.25).sp,
+        ),
+        titleMedium = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Medium,
+            fontSize = 16.sp, lineHeight = 22.sp,
+        ),
+        bodyLarge = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Light,
+            fontSize = 16.sp, lineHeight = 26.sp,
+        ),
+        bodyMedium = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Light,
+            fontSize = 14.sp, lineHeight = 22.sp,
+        ),
+        bodySmall = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Light,
+            fontSize = 12.sp, lineHeight = 18.sp,
+        ),
+        labelLarge = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Medium,
+            fontSize = 14.sp, lineHeight = 20.sp, letterSpacing = 1.sp,
+        ),
+        labelMedium = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal,
+            fontSize = 12.sp, lineHeight = 16.sp, letterSpacing = 1.sp,
+        ),
+    )
+    // 水墨画风：全站衬线（风格规范「Always use serif fonts」）+ 轻字重 + 宽字距，
+    // 标题 tracking-wide 呼应题跋，正文衬线 light 保持书卷气
+    ThemeMode.INKWASH -> Typography(
+        headlineLarge = TextStyle(
+            fontFamily = FontFamily.Serif, fontWeight = FontWeight.Light,
+            fontSize = 28.sp, lineHeight = 36.sp, letterSpacing = 2.sp,
+        ),
+        headlineMedium = TextStyle(
+            fontFamily = FontFamily.Serif, fontWeight = FontWeight.Light,
+            fontSize = 24.sp, lineHeight = 32.sp, letterSpacing = 1.5.sp,
+        ),
+        headlineSmall = TextStyle(
+            fontFamily = FontFamily.Serif, fontWeight = FontWeight.Light,
+            fontSize = 20.sp, lineHeight = 28.sp, letterSpacing = 1.sp,
+        ),
+        titleLarge = TextStyle(
+            fontFamily = FontFamily.Serif, fontWeight = FontWeight.Light,
+            fontSize = 20.sp, lineHeight = 28.sp, letterSpacing = 1.sp,
+        ),
+        titleMedium = TextStyle(
+            fontFamily = FontFamily.Serif, fontWeight = FontWeight.Normal,
+            fontSize = 16.sp, lineHeight = 24.sp, letterSpacing = 0.5.sp,
+        ),
+        bodyLarge = TextStyle(
+            fontFamily = FontFamily.Serif, fontWeight = FontWeight.Light,
+            fontSize = 16.sp, lineHeight = 26.sp,
+        ),
+        bodyMedium = TextStyle(
+            fontFamily = FontFamily.Serif, fontWeight = FontWeight.Light,
+            fontSize = 14.sp, lineHeight = 22.sp,
+        ),
+        bodySmall = TextStyle(
+            fontFamily = FontFamily.Serif, fontWeight = FontWeight.Light,
+            fontSize = 12.sp, lineHeight = 18.sp,
+        ),
+        labelLarge = TextStyle(
+            fontFamily = FontFamily.Serif, fontWeight = FontWeight.Normal,
+            fontSize = 14.sp, lineHeight = 20.sp, letterSpacing = 1.sp,
+        ),
+        labelMedium = TextStyle(
+            fontFamily = FontFamily.Serif, fontWeight = FontWeight.Normal,
+            fontSize = 12.sp, lineHeight = 16.sp, letterSpacing = 0.8.sp,
+        ),
+    )
     else -> Typography
 }
 
@@ -220,6 +352,14 @@ private fun shapesFor(mode: ThemeMode): Shapes = when (mode) {
         medium = RoundedCornerShape(6.dp),
         large = RoundedCornerShape(6.dp),
         extraLarge = RoundedCornerShape(8.dp),
+    )
+    // 水墨：风格规范 rounded-none，2dp 微圆角折衷（同单色极简的处理方式）
+    ThemeMode.INKWASH -> Shapes(
+        extraSmall = RoundedCornerShape(2.dp),
+        small = RoundedCornerShape(2.dp),
+        medium = RoundedCornerShape(2.dp),
+        large = RoundedCornerShape(2.dp),
+        extraLarge = RoundedCornerShape(2.dp),
     )
     else -> Shapes()
 }

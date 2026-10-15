@@ -17,5 +17,8 @@ fun ThemeBackdrop(modifier: Modifier = Modifier) {
         ThemeMode.NOCTURNE -> NocturneScene(modifier)
         ThemeMode.DOODLE -> DoodleBackdrop(modifier)
         ThemeMode.WATERCOLOR -> WatercolorBloom(modifier)
+        // 水墨：纯宣纸留白（计白当黑，留白即设计），走 bgPrimary 纯色底
+        ThemeMode.INKWASH -> {}
+        else -> {}
     }
 }

@@ -49,6 +49,9 @@ import com.example.flowtime.ui.theme.GlassBorder
 import com.example.flowtime.ui.theme.GlassBorderHigh
 import com.example.flowtime.ui.theme.GlassBottomShade
 import com.example.flowtime.ui.theme.GlassFillHigh
+import com.example.flowtime.ui.theme.InkNong
+import com.example.flowtime.ui.theme.InkQing
+import com.example.flowtime.ui.theme.InkYanzhi
 import com.example.flowtime.ui.theme.Moonlight
 import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.PrimaryLight
@@ -96,7 +99,8 @@ fun RingTimer(
     val mode = ActivePalette.mode
     val dimFadeMs = when (mode) {
         // 玻璃拟态禁 duration-100/150：状态淡入淡出一律 500ms 流体缓动
-        ThemeMode.WATERCOLOR, ThemeMode.NOCTURNE -> 600
+        // 水墨：慢过渡模拟墨色晕染（风格规范 duration-700 的移植档）
+        ThemeMode.WATERCOLOR, ThemeMode.NOCTURNE, ThemeMode.INKWASH -> 600
         else -> 300
     }
     val ringAlpha by animateFloatAsState(
@@ -108,11 +112,19 @@ fun RingTimer(
     // ---- 颜料色：随剩余时间流动（颜料进度 0→1 即剩余时间 1→0）----
     val pigmentBase = run {
         val pigmentP = pigmentProgress.coerceIn(0f, 1f)
-        val settled = lerp(AccentGreen, Primary, (pigmentP / 0.85f).coerceIn(0f, 1f))
-        val urgent = ((pigmentP - 0.88f) / 0.12f).coerceIn(0f, 1f)
-        // 玻璃拟态的紧迫色是"更亮的香槟"（唯一强调色），水彩/涂鸦用玫瑰/红笔
-        val urgentColor = if (mode == ThemeMode.NOCTURNE) ChampagneBright else WatercolorRose
-        lerp(settled, urgentColor, urgent * 0.75f)
+        if (mode == ThemeMode.INKWASH) {
+            // 墨分五色：起步清墨，随时间推移墨色渐浓（时间越少墨越重）；
+            // 紧迫时洇开一点胭脂（印章红降饱和，禁艳色）
+            val inkSettled = lerp(InkQing, InkNong, pigmentP)
+            val urgent = ((pigmentP - 0.88f) / 0.12f).coerceIn(0f, 1f)
+            lerp(inkSettled, InkYanzhi, urgent * 0.7f)
+        } else {
+            val settled = lerp(AccentGreen, Primary, (pigmentP / 0.85f).coerceIn(0f, 1f))
+            val urgent = ((pigmentP - 0.88f) / 0.12f).coerceIn(0f, 1f)
+            // 玻璃拟态的紧迫色是"更亮的香槟"（唯一强调色），水彩/涂鸦用玫瑰/红笔
+            val urgentColor = if (mode == ThemeMode.NOCTURNE) ChampagneBright else WatercolorRose
+            lerp(settled, urgentColor, urgent * 0.75f)
+        }
     }
     val pigmentLight = lerp(pigmentBase, PrimaryLight, 0.45f)
 
@@ -161,6 +173,17 @@ fun RingTimer(
                         size.height - (inset - strokePx * 0.5f) * 2,
                     ),
                     style = Stroke(width = strokePx * 0.14f, cap = StrokeCap.Round),
+                )
+            } else if (mode == ThemeMode.INKWASH) {
+                // 淡墨底环：清墨一圈，像下笔前蘸清水描的底稿（水墨线条纤细，0.85×）
+                drawArc(
+                    color = InkQing.copy(alpha = 0.32f * ringA),
+                    startAngle = 0f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = strokePx * 0.85f, cap = StrokeCap.Round),
                 )
             } else {
                 drawArc(
@@ -339,6 +362,41 @@ fun RingTimer(
                             ),
                         )
                     }
+
+                    // 水墨：飞白（干笔擦痕，长虚线细弧）+ 内缘渗墨（墨在纸纤维里洇出的淡影）
+                    ThemeMode.INKWASH -> {
+                        drawArc(
+                            brush = gradient,
+                            startAngle = -90f,
+                            sweepAngle = sweep,
+                            useCenter = false,
+                            topLeft = topLeft,
+                            size = arcSize,
+                            alpha = 0.30f * ringA,
+                            style = Stroke(
+                                width = strokePx * 0.42f,
+                                cap = StrokeCap.Round,
+                                pathEffect = PathEffect.dashPathEffect(
+                                    floatArrayOf(strokePx * 2.8f, strokePx * 1.1f),
+                                    strokePx * 0.9f,
+                                ),
+                            ),
+                        )
+                        val bleedIns = inset + strokePx * 0.34f
+                        drawArc(
+                            color = pigmentBase,
+                            startAngle = -90f,
+                            sweepAngle = sweep,
+                            useCenter = false,
+                            topLeft = Offset(bleedIns, bleedIns),
+                            size = Size(size.width - bleedIns * 2, size.height - bleedIns * 2),
+                            alpha = 0.16f * ringA,
+                            style = Stroke(width = strokePx * 0.22f, cap = StrokeCap.Round),
+                        )
+                    }
+
+                    // 单色极简无专属材质：通用主笔触已够（灰阶 gradient 由调色板提供）
+                    else -> {}
                 }
 
                 // 弧首圆点（涂鸦主题补一个错位的"重描"点，像画了两笔）
@@ -358,6 +416,18 @@ fun RingTimer(
                     drawCircle(
                         color = ChampagneBright.copy(alpha = 0.95f * ringA),
                         radius = strokePx * 0.26f,
+                        center = headCenter,
+                    )
+                } else if (mode == ThemeMode.INKWASH) {
+                    // 弧首 = 一滴浓墨：淡墨湿边先洇开，浓墨落点居中（静态，无动画）
+                    drawCircle(
+                        color = InkQing.copy(alpha = 0.30f * ringA),
+                        radius = strokePx * 0.72f,
+                        center = headCenter,
+                    )
+                    drawCircle(
+                        color = pigmentBase.copy(alpha = 0.92f * ringA),
+                        radius = strokePx * 0.46f,
                         center = headCenter,
                     )
                 } else {
@@ -384,6 +454,7 @@ fun RingTimer(
             val tickFadeMs = when (mode) {
                 ThemeMode.WATERCOLOR -> 500
                 ThemeMode.NOCTURNE -> 250
+                ThemeMode.INKWASH -> 400
                 else -> 120
             }
             // 时钟容器宽度钉死在最宽组合上：AnimatedContent 交替时容器会在新旧
