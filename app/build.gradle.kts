@@ -1,7 +1,16 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+}
+
+// release 签名凭据放在 git 仓库之外：FlowTime/keystore/keystore.properties
+// 🔴 rootProject = FlowTime/FlowTime，所以只上一级就到 FlowTime/keystore（别写成 ../../）
+val keystoreProps = Properties().apply {
+    val f = rootProject.file("../keystore/keystore.properties")
+    if (f.exists()) f.inputStream().use { load(it) }
 }
 
 android {
@@ -20,8 +29,22 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            // keystore 目录不进 git，所以 properties 缺失时要能降级（否则连 debug 都编不了）
+            if (keystoreProps.isNotEmpty()) {
+                storeFile = rootProject.file("../keystore/flowtime.jks")
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
     buildTypes {
         release {
+            if (keystoreProps.isNotEmpty()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             optimization {
                 enable = false
             }
@@ -61,4 +84,15 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
+}
+
+// 产物改名：默认是 `<模块名>-<构建类型>.apk`（app-debug.apk / app-release.apk），
+// 模块目录叫 app 所以才会带 app 前缀。改成 FlowTime-debug.apk / FlowTime-release.apk。
+// 🔴 老写法 `applicationVariants.all { outputFileName = ... }` 在 AGP 8 已移除，AGP 9 只能用下面这个。
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            output.outputFileName.set("FlowTime-${variant.name}.apk")
+        }
+    }
 }
