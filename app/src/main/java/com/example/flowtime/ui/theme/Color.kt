@@ -13,12 +13,12 @@ import androidx.compose.ui.unit.dp
 // ── 多主题体系 ─────────────────────────────────────────────────
 // 全站界面只引用本文件的 token（BgPrimary、Primary……），token 是
 // 「当前调色板 ActivePalette」的读取器；设置页切换主题时整体换装。
-// 三套起步主题：水彩画风 / 玻璃拟态 / 手绘涂鸦；后追加单色极简，共四套。
+// 三套起步主题：水彩画风 / 玻璃拟态 / 手绘涂鸦；后追加单色极简、铅笔手绘，共五套。
 // 形状与装饰也属于主题语言（卡片圆角、胶囊 chip、虚线边框、横幅笔刷），
 // 一并放进 AppPalette，组件里不允许再写死 RoundedCornerShape。
 
 /** 可切换的主题模式 */
-enum class ThemeMode { WATERCOLOR, NOCTURNE, DOODLE, MONO }
+enum class ThemeMode { WATERCOLOR, NOCTURNE, DOODLE, MONO, SKETCH }
 
 /** 一套主题的全部 token：颜色 + 形状 + 装饰 */
 interface AppPalette {
@@ -413,9 +413,96 @@ object MonoPalette : AppPalette {
 }
 
 
+// ── 铅笔手绘 / Sketch（第五版）──────────────────────────────────
+// 提示词：风格提示词/铅笔手绘风.md。规则：纸张米色底（禁纯白）、铅笔灰主色、
+// 虚线边框（border-2 border-dashed）、衬线斜体标题、交叉排线阴影（画线不画色）、
+// 元素轻微倾斜、低饱和强调色；禁一切渐变 / 玻璃模糊 / 高饱和霓虹、禁大圆角。
+
+/** 铅笔与纸张（规范给定的两个基色；仅铅笔手绘场景与调色板使用） */
+val SketchGraphite = Color(0xFF2C2C2C)      // 铅笔灰（主色 / 主文字）
+val SketchGraphiteSoft = Color(0xFF5A5A5A)  // 铅笔灰 70%（正文辅色）
+val SketchGraphiteFaint = Color(0xFF8A8A8A) // 铅笔灰 45%（弱化 / 占位）
+val SketchPaper = Color(0xFFF5F0E8)         // 纸张米色（页面背景）
+val SketchPaperDeep = Color(0xFFE8E2D8)     // 纸张米色深一档（辅背景 / 浅色块）
+val SketchPaperLight = Color(0xFFFAF5ED)    // 纸面提亮（卡片 / 输入框）
+
+/** 低饱和强调色（规范给定的四支彩色铅笔） */
+val SketchRed = Color(0xFFE74C3C)
+val SketchBlue = Color(0xFF3498DB)
+val SketchGreen = Color(0xFF27AE60)
+val SketchYellow = Color(0xFFF39C12)
+
+object SketchPalette : AppPalette {
+    override val mode = ThemeMode.SKETCH
+    override val label = "铅笔手绘"
+    override val tagline = "素描本 · 铅笔灰"
+    override val previewDots = listOf(SketchPaper, SketchGraphite, SketchRed)
+
+    override val bgPrimary = SketchPaper
+    override val primary = SketchGraphite               // 主按钮 = 铅笔灰底 + 纸色字
+    override val primaryDark = Color(0xFF1F1F1F)
+    override val primaryLight = SketchGraphiteSoft
+    override val accentGreen = SketchGreen
+    override val cardGreenLight = Color(0xFFE4EFE6)     // 选中态 = 淡绿纸（低饱和）
+    override val cardOrange = Color(0xFFF7E7D2)
+    override val cardCream = SketchPaperDeep
+    override val mutedSurface = SketchPaperDeep
+    override val gold = SketchYellow
+    override val textPrimary = SketchGraphite
+    override val textSecondary = SketchGraphiteSoft
+    override val textPlaceholder = SketchGraphiteFaint
+    override val dividerColor = Color(0x332C2C2C)       // 铅笔灰 20%（虚线段用）
+    override val borderColor = SketchGraphite           // 手绘描边 = 实心铅笔灰
+    override val surfaceCard = SketchPaperLight
+    override val dialogContainer = SketchPaperLight
+    override val errorRed = SketchRed
+    override val warningAmber = SketchYellow
+    override val successGreen = SketchGreen
+    override val disabledGray = Color(0xFFB9B4A8)
+    // 16 组纸卡：底色为低饱和纸感色，深色卡加深到白字对比 ≥4.5:1（规范自检 WCAG AA）
+    override val taskCardPalette = listOf(
+        Color(0xFFEDE7DC) to textPrimary,   // 米纸
+        Color(0xFFE4E9F0) to textPrimary,   // 蓝灰纸
+        Color(0xFFE7EFE9) to textPrimary,   // 绿纸
+        Color(0xFFF3E7DC) to textPrimary,   // 蜜桃纸
+        Color(0xFFF0E4E4) to textPrimary,   // 粉纸
+        Color(0xFFF5EEDC) to textPrimary,   // 黄纸
+        Color(0xFFE9E4EF) to textPrimary,   // 藕荷纸
+        Color(0xFFE2EAE6) to textPrimary,   // 青纸
+        SketchGraphite to SketchPaper,      // 铅笔灰卡（纸色字）
+        Color(0xFFDCE3EC) to textPrimary,   // 灰蓝纸
+        Color(0xFFEFE3D6) to textPrimary,   // 牛皮纸
+        Color(0xFFE5E8DC) to textPrimary,   // 浅橄榄纸
+        Color(0xFFC0392B) to SketchPaper,   // 红铅笔（加深保对比）
+        Color(0xFF2C6FA3) to SketchPaper,   // 蓝铅笔（加深保对比）
+        Color(0xFF1E8449) to SketchPaper,   // 绿铅笔（加深保对比）
+        Color(0xFFE0A94A) to textPrimary,   // 黄铅笔（深字）
+    )
+    override val navContainer = SketchPaperLight
+    override val navItemUnselected = SketchGraphiteFaint
+    override val shadowInk = SketchGraphite             // 交叉排线阴影的线条色（见 ProCard）
+    override val shadowAmbientAlpha = 1f
+    override val shadowSpotAlpha = 1f
+    override val ink = SketchGraphite
+    override val peach = SketchYellow
+    override val teal = SketchGreen
+    override val rose = SketchRed
+    override val sand = SketchBlue
+
+    // 手绘不规则：四角半径各不相同（禁完美圆角），且都在 rounded-sm 量级（禁大圆角）
+    override val cardShape = RoundedCornerShape(topStart = 7.dp, topEnd = 4.dp, bottomEnd = 8.dp, bottomStart = 5.dp)
+    override val tileShape = RoundedCornerShape(topStart = 5.dp, topEnd = 3.dp, bottomEnd = 6.dp, bottomStart = 4.dp)
+    override val badgeShape = RoundedCornerShape(3.dp)
+    override val buttonShape = RoundedCornerShape(topStart = 6.dp, topEnd = 4.dp, bottomEnd = 6.dp, bottomStart = 4.dp)
+    override val pillShape = RoundedCornerShape(4.dp)   // 禁 rounded-full：胶囊退化为小圆角
+    override val dashedBorders = true                   // 手绘虚线描边
+    override val bannerBrush = SolidColor(primary)      // 禁渐变：扁平铅色横幅
+}
+
+
 /** 全部主题（选择界面按此顺序展示） */
 val AllPalettes: List<AppPalette> =
-    listOf(WatercolorPalette, NocturnePalette, DoodlePalette, MonoPalette)
+    listOf(WatercolorPalette, NocturnePalette, DoodlePalette, MonoPalette, SketchPalette)
 
 /** 当前生效的调色板（快照状态：切换后所有读取它的组合范围自动重组） */
 var ActivePalette: AppPalette by mutableStateOf(NocturnePalette)
@@ -426,6 +513,7 @@ fun paletteFor(mode: ThemeMode): AppPalette =
         ThemeMode.NOCTURNE -> NocturnePalette
         ThemeMode.DOODLE -> DoodlePalette
         ThemeMode.MONO -> MonoPalette
+        ThemeMode.SKETCH -> SketchPalette
     }
 
 // ── 全站 token（读取 ActivePalette，调用点无需感知主题切换）──────

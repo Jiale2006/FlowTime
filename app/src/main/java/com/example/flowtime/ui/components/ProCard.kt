@@ -66,6 +66,13 @@ fun ProCard(
                 Box { content() }
             }
         }
+        ThemeMode.SKETCH -> {
+            // 铅笔手绘：纸面 + 虚线描边 + 交叉排线阴影（画线不画色，规范「阴影用交叉线条」）。
+            // 排线阴影同样会画出布局边界（右/下各 3dp），所以不 clip。
+            Box(modifier.drawBehind { drawSketchCard(shape, color, palette.shadowInk) }) {
+                Box { content() }
+            }
+        }
         ThemeMode.NOCTURNE -> {
             Box(modifier.softShadow(shape, 12.dp).clip(shape)) {
                 // 第 1 层：无色玻璃底（默认 GlassFill；弹窗等可传入更实的容器色）

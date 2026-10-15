@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -39,6 +40,7 @@ fun FlowTimeTheme(
         ThemeMode.DOODLE -> doodleScheme(palette)
         ThemeMode.WATERCOLOR -> watercolorScheme(palette)
         ThemeMode.MONO -> monoScheme(palette)
+        ThemeMode.SKETCH -> sketchScheme(palette)
     }
     SceneSystemBarsEffect(palette)
     MaterialTheme(
@@ -128,6 +130,27 @@ private fun monoScheme(p: AppPalette) = lightColorScheme(
     onSecondary = MonoPaper,
     tertiary = p.gold,
     onTertiary = MonoPaper,
+    background = p.bgPrimary,
+    onBackground = p.textPrimary,
+    surface = p.surfaceCard,
+    onSurface = p.textPrimary,
+    surfaceVariant = p.cardCream,
+    onSurfaceVariant = p.textSecondary,
+    outline = p.dividerColor,
+    outlineVariant = p.borderColor,
+    error = p.errorRed,
+)
+
+/** 铅笔手绘（纸张米色底；铅笔灰主按钮 + 低饱和四色铅笔，禁渐变/玻璃）*/
+private fun sketchScheme(p: AppPalette) = lightColorScheme(
+    primary = p.primary,
+    onPrimary = SketchPaper,
+    primaryContainer = p.cardGreenLight,
+    onPrimaryContainer = p.textPrimary,
+    secondary = p.accentGreen,
+    onSecondary = SketchPaper,
+    tertiary = p.gold,
+    onTertiary = SketchGraphite,
     background = p.bgPrimary,
     onBackground = p.textPrimary,
     surface = p.surfaceCard,
@@ -268,10 +291,68 @@ private fun typographyFor(mode: ThemeMode): Typography = when (mode) {
             fontSize = 12.sp, lineHeight = 16.sp, letterSpacing = 1.sp,
         ),
     )
+    // 铅笔手绘：标题走衬线斜体（规范「使用手写风格字体或 serif 字体」+ 自检「文字使用衬线斜体」），
+    // 正文衬线正体 —— 斜体正文伤可读性，只把斜体留给标题/小标题层；全站无粗黑体。
+    ThemeMode.SKETCH -> Typography(
+        headlineLarge = TextStyle(
+            fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 28.sp, lineHeight = 36.sp, letterSpacing = 0.4.sp,
+        ),
+        headlineMedium = TextStyle(
+            fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 24.sp, lineHeight = 32.sp, letterSpacing = 0.3.sp,
+        ),
+        headlineSmall = TextStyle(
+            fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 20.sp, lineHeight = 28.sp, letterSpacing = 0.3.sp,
+        ),
+        titleLarge = TextStyle(
+            fontFamily = FontFamily.Serif, fontStyle = FontStyle.Italic,
+            fontWeight = FontWeight.SemiBold,
+            fontSize = 20.sp, lineHeight = 28.sp, letterSpacing = 0.2.sp,
+        ),
+        titleMedium = TextStyle(
+            fontFamily = FontFamily.Serif,
+            fontWeight = FontWeight.Medium,
+            fontSize = 16.sp, lineHeight = 24.sp,
+        ),
+        bodyLarge = TextStyle(
+            fontFamily = FontFamily.Serif,
+            fontWeight = FontWeight.Normal,
+            fontSize = 16.sp, lineHeight = 26.sp,
+        ),
+        bodyMedium = TextStyle(
+            fontFamily = FontFamily.Serif,
+            fontWeight = FontWeight.Normal,
+            fontSize = 14.sp, lineHeight = 22.sp,
+        ),
+        bodySmall = TextStyle(
+            fontFamily = FontFamily.Serif,
+            fontWeight = FontWeight.Normal,
+            fontSize = 12.sp, lineHeight = 18.sp,
+        ),
+        labelLarge = TextStyle(
+            fontFamily = FontFamily.Serif,
+            fontWeight = FontWeight.Medium,
+            fontSize = 14.sp, lineHeight = 20.sp,
+        ),
+        labelMedium = TextStyle(
+            fontFamily = FontFamily.Serif,
+            fontWeight = FontWeight.Normal,
+            fontSize = 12.sp, lineHeight = 18.sp,
+        ),
+    )
     else -> Typography
 }
 
-/** 水彩把 M3 组件圆角整体放大（输入框 extraSmall=16dp ≈ rounded-2xl）；涂鸦整体收小 */
+/**
+ * M3 组件圆角随主题整体缩放：
+ * 水彩放大（输入框 extraSmall=16dp ≈ rounded-2xl）；涂鸦收小；
+ * 铅笔手绘取 rounded-sm 量级（规范禁大圆角，只留 4~8dp）。
+ */
 private fun shapesFor(mode: ThemeMode): Shapes = when (mode) {
     ThemeMode.WATERCOLOR -> Shapes(
         extraSmall = RoundedCornerShape(16.dp),
@@ -279,6 +360,13 @@ private fun shapesFor(mode: ThemeMode): Shapes = when (mode) {
         medium = RoundedCornerShape(20.dp),
         large = RoundedCornerShape(24.dp),
         extraLarge = RoundedCornerShape(28.dp),
+    )
+    ThemeMode.SKETCH -> Shapes(
+        extraSmall = RoundedCornerShape(4.dp),
+        small = RoundedCornerShape(4.dp),
+        medium = RoundedCornerShape(6.dp),
+        large = RoundedCornerShape(6.dp),
+        extraLarge = RoundedCornerShape(8.dp),
     )
     ThemeMode.DOODLE -> Shapes(
         extraSmall = RoundedCornerShape(4.dp),

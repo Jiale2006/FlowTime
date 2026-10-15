@@ -7,17 +7,20 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.CardCream
 import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.TextSecondary
+import com.example.flowtime.ui.theme.ThemeMode
 import com.example.flowtime.ui.theme.WatercolorInk
 
 /**
  * 大类标注：让每个小任务都能看出属于哪个大类。
  * 水彩规则：低透明度底 + 大圆角 + 无硬边框；未分类用纸色弱化显示。
+ * 铅笔手绘：可由调用方开启轻微倾斜（规范「元素保留轻微倾斜 rotate-[-1deg]」）。
  */
 @Composable
 fun CategoryBadge(
@@ -25,6 +28,8 @@ fun CategoryBadge(
     modifier: Modifier = Modifier,
     /** 深色卡片上用：以当前卡片文字色渲染 */
     onCardColor: androidx.compose.ui.graphics.Color? = null,
+    /** 铅笔手绘主题专属：徽章轻微倾斜，增加手绘感。只由计时页传入，其余调用点不受影响 */
+    tilt: Boolean = false,
 ) {
     val isCategorized = categoryName != null
     val label = categoryName ?: "未分类"
@@ -45,6 +50,13 @@ fun CategoryBadge(
         color = fg,
         maxLines = 1,
         modifier = modifier
+            .then(
+                if (tilt && ActivePalette.mode == ThemeMode.SKETCH) {
+                    Modifier.rotate(-1.5f)
+                } else {
+                    Modifier
+                },
+            )
             .clip(ActivePalette.badgeShape)
             .background(bg)
             .padding(horizontal = 8.dp, vertical = 3.dp),

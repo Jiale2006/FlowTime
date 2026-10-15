@@ -53,6 +53,9 @@ import com.example.flowtime.ui.theme.Moonlight
 import com.example.flowtime.ui.theme.MonoGray300
 import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.PrimaryLight
+import com.example.flowtime.ui.theme.SketchGraphite
+import com.example.flowtime.ui.theme.SketchGraphiteSoft
+import com.example.flowtime.ui.theme.SketchRed
 import com.example.flowtime.ui.theme.TextPrimary
 import com.example.flowtime.ui.theme.ThemeMode
 import com.example.flowtime.ui.theme.WatercolorInk
@@ -99,6 +102,8 @@ fun RingTimer(
         // 玻璃拟态禁 duration-100/150：状态淡入淡出一律 500ms 流体缓动；
         // 单色极简：Deliberate Slowness（风格规范 duration-500~700 的慢节奏）
         ThemeMode.WATERCOLOR, ThemeMode.NOCTURNE, ThemeMode.MONO -> 600
+        // 铅笔手绘：手绘反馈应「短促直接」（禁长时间平滑动画）
+        ThemeMode.SKETCH -> 180
         else -> 300
     }
     val ringAlpha by animateFloatAsState(
@@ -110,10 +115,21 @@ fun RingTimer(
     // ---- 颜料色：随剩余时间流动（颜料进度 0→1 即剩余时间 1→0）----
     val pigmentBase = run {
         val pigmentP = pigmentProgress.coerceIn(0f, 1f)
-        val settled = lerp(AccentGreen, Primary, (pigmentP / 0.85f).coerceIn(0f, 1f))
+        // 铅笔手绘的进度不是"调色板渐变"，而是铅笔由淡到浓再泛红：
+        // 起步浅石墨 → 走深变铅笔灰 → 临近末尾转低饱和红（规范允许的强调色之一）。
+        val settled = if (mode == ThemeMode.SKETCH) {
+            lerp(SketchGraphiteSoft, SketchGraphite, (pigmentP / 0.85f).coerceIn(0f, 1f))
+        } else {
+            lerp(AccentGreen, Primary, (pigmentP / 0.85f).coerceIn(0f, 1f))
+        }
         val urgent = ((pigmentP - 0.88f) / 0.12f).coerceIn(0f, 1f)
-        // 玻璃拟态的紧迫色是"更亮的香槟"（唯一强调色），水彩/涂鸦用玫瑰/红笔
-        val urgentColor = if (mode == ThemeMode.NOCTURNE) ChampagneBright else WatercolorRose
+        // 玻璃拟态的紧迫色是"更亮的香槟"（唯一强调色）；铅笔手绘用低饱和红；
+        // 水彩/涂鸦用玫瑰/红笔
+        val urgentColor = when (mode) {
+            ThemeMode.NOCTURNE -> ChampagneBright
+            ThemeMode.SKETCH -> SketchRed
+            else -> WatercolorRose
+        }
         lerp(settled, urgentColor, urgent * 0.75f)
     }
     val pigmentLight = lerp(pigmentBase, PrimaryLight, 0.45f)
@@ -163,6 +179,24 @@ fun RingTimer(
                         size.height - (inset - strokePx * 0.5f) * 2,
                     ),
                     style = Stroke(width = strokePx * 0.14f, cap = StrokeCap.Round),
+                )
+            } else if (mode == ThemeMode.SKETCH) {
+                // 铅笔手绘底色环 = 一道铅笔虚线（规范「边框使用不规则风格 border-dashed」）。
+                // 底环刻意不画实线：断笔感让"手描一圈"的手工味出来，也避免出现"完美圆"。
+                drawArc(
+                    color = SketchGraphite.copy(alpha = 0.34f * ringA),
+                    startAngle = 0f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(
+                        width = strokePx * 0.55f,
+                        cap = StrokeCap.Round,
+                        pathEffect = PathEffect.dashPathEffect(
+                            floatArrayOf(strokePx * 1.15f, strokePx * 0.95f),
+                        ),
+                    ),
                 )
             } else {
                 drawArc(
@@ -358,6 +392,27 @@ fun RingTimer(
                         )
                     }
 
+                    // 铅笔手绘：在石墨灰主笔触之上再落一道断笔虚线「重描」——
+                    // 像用铅笔沿弧又划了一遍，笔触接不齐正是手绘的证据（规范「保留笔触粗糙感」）
+                    ThemeMode.SKETCH -> {
+                        drawArc(
+                            color = SketchGraphite,
+                            startAngle = -90f,
+                            sweepAngle = sweep,
+                            useCenter = false,
+                            topLeft = topLeft,
+                            size = arcSize,
+                            alpha = 0.40f * ringA,
+                            style = Stroke(
+                                width = strokePx * 0.28f,
+                                cap = StrokeCap.Round,
+                                pathEffect = PathEffect.dashPathEffect(
+                                    floatArrayOf(strokePx * 3.0f, strokePx * 1.1f),
+                                ),
+                            ),
+                        )
+                    }
+
                     else -> {}
                 }
 
@@ -386,7 +441,8 @@ fun RingTimer(
                         radius = strokePx * 0.52f,
                         center = headCenter,
                     )
-                    if (doodle) {
+                    if (doodle || mode == ThemeMode.SKETCH) {
+                        // 手绘主题的弧首补一个错位的"重描"点，像画了两笔
                         drawCircle(
                             color = pigmentBase.copy(alpha = 0.35f * ringA),
                             radius = strokePx * 0.48f,
@@ -406,6 +462,8 @@ fun RingTimer(
                 ThemeMode.NOCTURNE -> 250
                 // 单色极简：Deliberate Slowness（等宽数字等宽，交叉淡化不会错位）
                 ThemeMode.MONO -> 500
+                // 铅笔手绘：手绘反馈短促直接，跳秒一闪即过
+                ThemeMode.SKETCH -> 90
                 else -> 120
             }
             // 时钟容器宽度钉死在最宽组合上：AnimatedContent 交替时容器会在新旧
@@ -418,7 +476,12 @@ fun RingTimer(
                 val clockStyle = TextStyle(
                     // 单色极简走等宽数字（风格规范 token「等宽: font-mono」）
                     fontFamily = if (mode == ThemeMode.MONO) FontFamily.Monospace else FontFamily.Serif,
-                    fontStyle = if (mode == ThemeMode.WATERCOLOR) FontStyle.Italic else FontStyle.Normal,
+                    // 水彩 / 铅笔手绘走衬线斜体（两份规范的自检项都点了"衬线斜体"）
+                    fontStyle = if (mode == ThemeMode.WATERCOLOR || mode == ThemeMode.SKETCH) {
+                        FontStyle.Italic
+                    } else {
+                        FontStyle.Normal
+                    },
                     fontSize = 64.sp,
                     fontWeight = FontWeight.Light,
                     letterSpacing = 2.sp,
@@ -470,7 +533,8 @@ fun RingTimer(
                         ClockText(
                             text = text,
                             color = timeColor,
-                            italic = false,
+                            // 铅笔手绘数字走衬线斜体（手绘感），其余主题正体
+                            italic = mode == ThemeMode.SKETCH,
                             fontFamily = if (mode == ThemeMode.MONO) FontFamily.Monospace else FontFamily.Serif,
                             modifier = Modifier.width(clockWidthDp),
                         )
