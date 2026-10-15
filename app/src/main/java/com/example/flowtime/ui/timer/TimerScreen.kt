@@ -59,6 +59,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
@@ -403,8 +404,15 @@ fun TimerScreen(
                             .offset(y = 28.dp)
                             .size(88.dp)
                             .clip(CircleShape)
-                            // 实心香槟 + 深墨字（白字压亮金对比只有 2.3:1，不及格）
-                            .background(Primary)
+                            // 实心主色 + 白字（夜航香槟底配深墨字，白字压亮金对比只有 2.3:1）；
+                            // 现代渐变下改走紫→品红横向渐变（规范「按钮用渐变」，只对本主题生效）
+                            .background(
+                                if (ActivePalette.mode == ThemeMode.GRADIENT) {
+                                    ActivePalette.bannerBrush
+                                } else {
+                                    SolidColor(Primary)
+                                },
+                            )
                             .pressScale()
                             .clickable {
                                 if (timer.phase == AppViewModel.TimerPhase.RUNNING) {

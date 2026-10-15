@@ -48,7 +48,8 @@ fun Modifier.softShadow(
  * - 玻璃拟态：无色玻璃（白 8%）+ 细描边（白 15%）+ 三层方向性光
  *   （顶边受光高光、底边背光暗缘、外层近黑深阴影）；
  * - 手绘涂鸦：奶白纸面 + 墨黑虚线描边 + 蓝绿标记笔硬偏移阴影 + 黄胶带，
- *   无 blur 阴影、无渐变、小圆角。
+ *   无 blur 阴影、无渐变、小圆角；
+ * - 现代渐变：白 10% 玻璃卡 + 白 20% 细边 + 顶边受光高光 + 紫彩色光晕阴影，大圆角。
  */
 @Composable
 fun ProCard(
@@ -96,6 +97,33 @@ fun ProCard(
                         ),
                     ),
                 )
+                Surface(
+                    modifier = Modifier.matchParentSize(),
+                    shape = shape,
+                    color = Color.Transparent,
+                    border = BorderStroke(1.dp, BorderColor),
+                ) {}
+                Box { content() }
+            }
+        }
+        ThemeMode.GRADIENT -> {
+            // 现代渐变：白 10% 玻璃卡 + 白 20% 细边 + 顶边受光高光 + 紫彩色光晕阴影。
+            // Android 端没有逐卡实时模糊，但页面底是"有色的光球场景"——半透明卡正好
+            // 借到身后那团渐变色，观感就是"渐变玻璃"（对着纯色底才是死板色块）。
+            // 与夜航玻璃的区别：夜航内容卡刻意用近实心钢蓝保可读；本主题卡片透，
+            // 因为底是深紫、白 10% 叠上去仍是深色，白字对比度 >10:1，可读性有余量。
+            Box(modifier.softShadow(shape, 16.dp).clip(shape)) {
+                // 第 1 层：白玻璃底（白 10%；弹窗传入更实的容器色）
+                Box(Modifier.matchParentSize().background(color))
+                // 第 2 层：顶边受光高光（白 12% → 全透明，光从上方来）
+                Box(
+                    Modifier.matchParentSize().background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color(0x1FFFFFFF), Color(0x00FFFFFF)),
+                        ),
+                    ),
+                )
+                // 第 3 层：1dp 白 20% 边框（规范 border-white/20）
                 Surface(
                     modifier = Modifier.matchParentSize(),
                     shape = shape,

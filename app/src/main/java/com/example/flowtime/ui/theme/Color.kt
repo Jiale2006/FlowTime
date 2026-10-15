@@ -13,12 +13,12 @@ import androidx.compose.ui.unit.dp
 // ── 多主题体系 ─────────────────────────────────────────────────
 // 全站界面只引用本文件的 token（BgPrimary、Primary……），token 是
 // 「当前调色板 ActivePalette」的读取器；设置页切换主题时整体换装。
-// 三套起步主题：水彩画风 / 玻璃拟态 / 手绘涂鸦；后追加单色极简、铅笔手绘，共五套。
+// 三套起步主题：水彩画风 / 玻璃拟态 / 手绘涂鸦；后追加单色极简、铅笔手绘、现代渐变，共六套。
 // 形状与装饰也属于主题语言（卡片圆角、胶囊 chip、虚线边框、横幅笔刷），
 // 一并放进 AppPalette，组件里不允许再写死 RoundedCornerShape。
 
 /** 可切换的主题模式 */
-enum class ThemeMode { WATERCOLOR, NOCTURNE, DOODLE, MONO, SKETCH }
+enum class ThemeMode { WATERCOLOR, NOCTURNE, DOODLE, MONO, SKETCH, GRADIENT }
 
 /** 一套主题的全部 token：颜色 + 形状 + 装饰 */
 interface AppPalette {
@@ -500,9 +500,98 @@ object SketchPalette : AppPalette {
 }
 
 
+// ── 现代渐变 / Modern Gradient（第六版）──────────────────────────
+// 提示词：风格提示词/全系渐变.md（style_slug: modern-gradient）。规则：深紫夜底
+// （bg-[#1e1b4b]）+ 紫→品红→青多彩渐变、白玻璃卡（白 10% 底 + 白 20% 边）、
+// 渐变文字、彩色光晕阴影、rounded-2xl/3xl 大圆角；禁纯色主背景、禁灰调、
+// 禁直角（rounded-none）、禁深色字。
+
+/** 渐变三原色（提示词 COLOR COMBOS 主色：violet → fuchsia → cyan） */
+val GradViolet = Color(0xFF8B5CF6)        // violet-500
+val GradVioletDeep = Color(0xFF7C3AED)    // violet-600
+val GradVioletLight = Color(0xFFA78BFA)   // violet-400
+val GradFuchsia = Color(0xFFD946EF)       // fuchsia-500
+val GradCyan = Color(0xFF06B6D4)          // cyan-500
+
+/** 深紫夜底（提示词 bg-slate-950 / bg-[#1e1b4b]） */
+val GradNight = Color(0xFF1E1B4B)         // indigo-950（页面主底）
+val GradNightDeep = Color(0xFF0E0A24)     // 更深的紫黑（渐变收口 / 冷启动底色）
+
+object GradientPalette : AppPalette {
+    override val mode = ThemeMode.GRADIENT
+    override val label = "现代渐变"
+    override val tagline = "深紫 · 多彩渐变"
+    override val previewDots = listOf(GradViolet, GradFuchsia, GradCyan)
+
+    override val bgPrimary = GradNight
+    override val primary = GradViolet                      // 主 CTA = 紫→品红渐变胶囊
+    override val primaryDark = GradVioletDeep
+    override val primaryLight = GradVioletLight
+    override val accentGreen = GradCyan
+    override val cardGreenLight = Color(0x338B5CF6)        // 选中态 = 紫 20% 玻璃
+    override val cardOrange = Color(0x33D946EF)            // 品红 20% 玻璃
+    override val cardCream = Color(0x14FFFFFF)             // 白 8% 玻璃（浅色块）
+    override val mutedSurface = Color(0x0FFFFFFF)
+    override val gold = Color(0xFFF0ABFC)                  // fuchsia-300
+    override val textPrimary = Color(0xFFF8FAFC)           // 近白（规范 text-white）
+    override val textSecondary = Color(0xB3FFFFFF)         // 白 70%（规范 text-white/70）
+    override val textPlaceholder = Color(0x66FFFFFF)       // 白 40%（placeholder:text-white/40）
+    override val dividerColor = Color(0x33FFFFFF)          // 白 20%（border-white/20）
+    override val borderColor = Color(0x33FFFFFF)
+    override val surfaceCard = Color(0x1AFFFFFF)           // 白 10% 玻璃卡（规范 bg-white/10）
+    override val dialogContainer = Color(0xFF241E45)       // 弹窗用更实的深紫（保证可读）
+    override val errorRed = Color(0xFFFB7185)              // rose-400
+    override val warningAmber = Color(0xFFFBBF24)
+    override val successGreen = Color(0xFF34D399)
+    override val disabledGray = Color(0x4DFFFFFF)
+    // 16 组深彩卡：白字压在深色渐变系上，对比度均 ≥4.5:1（规范禁单调灰调 / 禁深色字）
+    override val taskCardPalette = listOf(
+        Color(0xFF6D28D9) to Color.White,   // violet-700
+        Color(0xFF7E22CE) to Color.White,   // purple-700
+        Color(0xFFA21CAF) to Color.White,   // fuchsia-700
+        Color(0xFFBE185D) to Color.White,   // pink-700
+        Color(0xFF0E7490) to Color.White,   // cyan-700
+        Color(0xFF1D4ED8) to Color.White,   // blue-700
+        Color(0xFF4338CA) to Color.White,   // indigo-700
+        Color(0xFF047857) to Color.White,   // emerald-700
+        Color(0xFFB45309) to Color.White,   // amber-700
+        Color(0xFF9D174D) to Color.White,   // rose-800
+        Color(0xFF4C1D95) to Color.White,   // violet-900
+        Color(0xFF155E75) to Color.White,   // cyan-800
+        Color(0xFF3730A3) to Color.White,   // indigo-800
+        Color(0xFF86198F) to Color.White,   // fuchsia-800
+        Color(0xFF065F46) to Color.White,   // emerald-800
+        Color(0xFF78350F) to Color.White,   // amber-900
+    )
+    override val navContainer = Color(0xE61E1B4B)          // 深紫导航条（85% 沉底）
+    override val navItemUnselected = Color(0x80FFFFFF)
+    override val shadowInk = GradViolet                   // 彩色光晕阴影（规范 shadow-violet-500/xx）
+    override val shadowAmbientAlpha = 0.30f
+    override val shadowSpotAlpha = 0.28f
+    override val ink = GradViolet
+    override val peach = GradFuchsia
+    override val teal = GradCyan
+    override val rose = Color(0xFFF472B6)                 // pink-400
+    override val sand = Color(0xFFC4B5FD)                 // violet-300
+
+    // 大圆角（规范 rounded-2xl / rounded-3xl）；禁直角
+    override val cardShape = RoundedCornerShape(24.dp)     // rounded-3xl
+    override val tileShape = RoundedCornerShape(16.dp)     // rounded-2xl
+    override val badgeShape = RoundedCornerShape(12.dp)
+    override val buttonShape = RoundedCornerShape(16.dp)   // rounded-2xl
+    override val pillShape = RoundedCornerShape(50)        // 本风格未禁 rounded-full
+    override val dashedBorders = false
+    // 唯一允许渐变的主题：横幅走紫→品红横向渐变（规范「按钮/横幅用渐变」）
+    override val bannerBrush = Brush.horizontalGradient(listOf(GradViolet, GradFuchsia, GradCyan))
+}
+
+
 /** 全部主题（选择界面按此顺序展示） */
 val AllPalettes: List<AppPalette> =
-    listOf(WatercolorPalette, NocturnePalette, DoodlePalette, MonoPalette, SketchPalette)
+    listOf(
+        WatercolorPalette, NocturnePalette, DoodlePalette,
+        MonoPalette, SketchPalette, GradientPalette,
+    )
 
 /** 当前生效的调色板（快照状态：切换后所有读取它的组合范围自动重组） */
 var ActivePalette: AppPalette by mutableStateOf(NocturnePalette)
@@ -514,6 +603,7 @@ fun paletteFor(mode: ThemeMode): AppPalette =
         ThemeMode.DOODLE -> DoodlePalette
         ThemeMode.MONO -> MonoPalette
         ThemeMode.SKETCH -> SketchPalette
+        ThemeMode.GRADIENT -> GradientPalette
     }
 
 // ── 全站 token（读取 ActivePalette，调用点无需感知主题切换）──────

@@ -22,8 +22,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
@@ -49,6 +51,10 @@ import com.example.flowtime.ui.theme.GlassBorder
 import com.example.flowtime.ui.theme.GlassBorderHigh
 import com.example.flowtime.ui.theme.GlassBottomShade
 import com.example.flowtime.ui.theme.GlassFillHigh
+import com.example.flowtime.ui.theme.GradCyan
+import com.example.flowtime.ui.theme.GradFuchsia
+import com.example.flowtime.ui.theme.GradViolet
+import com.example.flowtime.ui.theme.GradVioletLight
 import com.example.flowtime.ui.theme.Moonlight
 import com.example.flowtime.ui.theme.MonoGray300
 import com.example.flowtime.ui.theme.Primary
@@ -102,6 +108,8 @@ fun RingTimer(
         // 玻璃拟态禁 duration-100/150：状态淡入淡出一律 500ms 流体缓动；
         // 单色极简：Deliberate Slowness（风格规范 duration-500~700 的慢节奏）
         ThemeMode.WATERCOLOR, ThemeMode.NOCTURNE, ThemeMode.MONO -> 600
+        // 现代渐变：Zero-Gravity Float 的 duration-500 + ease-out 节奏
+        ThemeMode.GRADIENT -> 500
         // 铅笔手绘：手绘反馈应「短促直接」（禁长时间平滑动画）
         ThemeMode.SKETCH -> 180
         else -> 300
@@ -117,17 +125,21 @@ fun RingTimer(
         val pigmentP = pigmentProgress.coerceIn(0f, 1f)
         // 铅笔手绘的进度不是"调色板渐变"，而是铅笔由淡到浓再泛红：
         // 起步浅石墨 → 走深变铅笔灰 → 临近末尾转低饱和红（规范允许的强调色之一）。
-        val settled = if (mode == ThemeMode.SKETCH) {
-            lerp(SketchGraphiteSoft, SketchGraphite, (pigmentP / 0.85f).coerceIn(0f, 1f))
-        } else {
-            lerp(AccentGreen, Primary, (pigmentP / 0.85f).coerceIn(0f, 1f))
+        // 现代渐变的进度就是它的招牌：紫 → 品红一路推过去。
+        val settled = when (mode) {
+            ThemeMode.SKETCH ->
+                lerp(SketchGraphiteSoft, SketchGraphite, (pigmentP / 0.85f).coerceIn(0f, 1f))
+            ThemeMode.GRADIENT ->
+                lerp(GradViolet, GradFuchsia, (pigmentP / 0.85f).coerceIn(0f, 1f))
+            else -> lerp(AccentGreen, Primary, (pigmentP / 0.85f).coerceIn(0f, 1f))
         }
         val urgent = ((pigmentP - 0.88f) / 0.12f).coerceIn(0f, 1f)
         // 玻璃拟态的紧迫色是"更亮的香槟"（唯一强调色）；铅笔手绘用低饱和红；
-        // 水彩/涂鸦用玫瑰/红笔
+        // 现代渐变收进青（补全 violet→fuchsia→cyan 三色收束）；水彩/涂鸦用玫瑰/红笔
         val urgentColor = when (mode) {
             ThemeMode.NOCTURNE -> ChampagneBright
             ThemeMode.SKETCH -> SketchRed
+            ThemeMode.GRADIENT -> GradCyan
             else -> WatercolorRose
         }
         lerp(settled, urgentColor, urgent * 0.75f)
@@ -198,6 +210,18 @@ fun RingTimer(
                         ),
                     ),
                 )
+            } else if (mode == ThemeMode.GRADIENT) {
+                // 现代渐变底色环 = 白 10% 玻璃管（规范卡片 glass 语言在环上的延续）：
+                // 深紫底上一圈极淡的白，托住上面那条三色进度弧。
+                drawArc(
+                    color = Color.White.copy(alpha = 0.10f * ringA),
+                    startAngle = 0f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = strokePx, cap = StrokeCap.Round),
+                )
             } else {
                 drawArc(
                     color = CardGreenLight.copy(alpha = 0.7f * ringA),
@@ -217,8 +241,8 @@ fun RingTimer(
                     colors = listOf(pigmentLight, pigmentBase, pigmentLight),
                     center = center,
                 )
-                // 主笔触（玻璃拟态走"管内液体光"专属分支，不叠通用主笔）
-                if (mode != ThemeMode.NOCTURNE) {
+                // 主笔触（玻璃拟态走"管内液体光"、现代渐变走三色 sweep，都不叠通用主笔）
+                if (mode != ThemeMode.NOCTURNE && mode != ThemeMode.GRADIENT) {
                     drawArc(
                         brush = gradient,
                         startAngle = -90f,
@@ -413,7 +437,36 @@ fun RingTimer(
                         )
                     }
 
-                    else -> {}
+                    // 现代渐变：紫→品红→青的三色 sweep 渐变（规范 COLOR COMBO
+                    // 「from-violet-500 via-fuchsia-500 to-cyan-500」）+ 贴内缘一道白色受光高光
+                    ThemeMode.GRADIENT -> {
+                        val flow = Brush.sweepGradient(
+                            colors = listOf(GradViolet, GradFuchsia, GradCyan, GradViolet),
+                            center = center,
+                        )
+                        drawArc(
+                            brush = flow,
+                            startAngle = -90f,
+                            sweepAngle = sweep,
+                            useCenter = false,
+                            topLeft = topLeft,
+                            size = arcSize,
+                            alpha = ringA,
+                            style = Stroke(width = strokePx * 0.9f, cap = StrokeCap.Round),
+                        )
+                        // 管内受光：贴内缘一道白 40% 细弧（玻璃管截面的镜面反射）
+                        val shineIns = inset + strokePx * 0.24f
+                        drawArc(
+                            color = Color.White,
+                            startAngle = -90f,
+                            sweepAngle = sweep,
+                            useCenter = false,
+                            topLeft = Offset(shineIns, shineIns),
+                            size = Size(size.width - shineIns * 2, size.height - shineIns * 2),
+                            alpha = 0.40f * ringA,
+                            style = Stroke(width = strokePx * 0.12f, cap = StrokeCap.Round),
+                        )
+                    }
                 }
 
                 // 弧首圆点（涂鸦主题补一个错位的"重描"点，像画了两笔）
@@ -422,7 +475,19 @@ fun RingTimer(
                     center.x + (radius * cos(headAngle)).toFloat(),
                     center.y + (radius * sin(headAngle)).toFloat(),
                 )
-                if (mode == ThemeMode.NOCTURNE) {
+                if (mode == ThemeMode.GRADIENT) {
+                    // 弧首发光核：品红彩色光晕 + 白亮芯（Neon Dispersion 的静态版）
+                    drawCircle(
+                        color = GradFuchsia.copy(alpha = 0.30f * ringA),
+                        radius = strokePx * 0.86f,
+                        center = headCenter,
+                    )
+                    drawCircle(
+                        color = Color(0xFFFDF4FF).copy(alpha = 0.95f * ringA),
+                        radius = strokePx * 0.38f,
+                        center = headCenter,
+                    )
+                } else if (mode == ThemeMode.NOCTURNE) {
                     // 液面前缘 = 香槟金游标（全环唯一香槟金定点）：一圈细环 + 亮核，静态不动。
                     drawCircle(
                         color = Champagne.copy(alpha = 0.9f * ringA),
@@ -464,6 +529,8 @@ fun RingTimer(
                 ThemeMode.MONO -> 500
                 // 铅笔手绘：手绘反馈短促直接，跳秒一闪即过
                 ThemeMode.SKETCH -> 90
+                // 现代渐变：transition-all duration-300 的节奏
+                ThemeMode.GRADIENT -> 300
                 else -> 120
             }
             // 时钟容器宽度钉死在最宽组合上：AnimatedContent 交替时容器会在新旧
@@ -474,8 +541,12 @@ fun RingTimer(
             val density = LocalDensity.current
             val clockWidthDp = remember(mode, density) {
                 val clockStyle = TextStyle(
-                    // 单色极简走等宽数字（风格规范 token「等宽: font-mono」）
-                    fontFamily = if (mode == ThemeMode.MONO) FontFamily.Monospace else FontFamily.Serif,
+                    // 单色极简走等宽（font-mono）；现代渐变走无衬线（规范全站无衬线）
+                    fontFamily = when (mode) {
+                        ThemeMode.MONO -> FontFamily.Monospace
+                        ThemeMode.GRADIENT -> FontFamily.SansSerif
+                        else -> FontFamily.Serif
+                    },
                     // 水彩 / 铅笔手绘走衬线斜体（两份规范的自检项都点了"衬线斜体"）
                     fontStyle = if (mode == ThemeMode.WATERCOLOR || mode == ThemeMode.SKETCH) {
                         FontStyle.Italic
@@ -535,7 +606,19 @@ fun RingTimer(
                             color = timeColor,
                             // 铅笔手绘数字走衬线斜体（手绘感），其余主题正体
                             italic = mode == ThemeMode.SKETCH,
-                            fontFamily = if (mode == ThemeMode.MONO) FontFamily.Monospace else FontFamily.Serif,
+                            fontFamily = when (mode) {
+                                ThemeMode.MONO -> FontFamily.Monospace
+                                ThemeMode.GRADIENT -> FontFamily.SansSerif
+                                else -> FontFamily.Serif
+                            },
+                            // 现代渐变：计时数字也走渐变文字（规范「文字用 bg-clip-text 渐变」）
+                            gradientBrush = if (mode == ThemeMode.GRADIENT) {
+                                Brush.linearGradient(
+                                    listOf(GradVioletLight, GradFuchsia, GradCyan),
+                                )
+                            } else {
+                                null
+                            },
                             modifier = Modifier.width(clockWidthDp),
                         )
                     }
@@ -549,6 +632,9 @@ fun RingTimer(
 /**
  * 时钟数字：默认衬线 Light + 宽字距。水彩走斜体（风格规则「文字使用衬线斜体」），
  * 单色极简走等宽（font-mono），其余主题正体。
+ *
+ * gradientBrush 非空时改走"渐变文字"：先正常画字，再叠一层 SrcIn 的渐变矩形
+ * （用文字当 alpha 遮罩切出渐变），是跨版本都成立的经典做法。
  */
 @Composable
 private fun ClockText(
@@ -557,10 +643,19 @@ private fun ClockText(
     italic: Boolean,
     modifier: Modifier = Modifier,
     fontFamily: FontFamily = FontFamily.Serif,
+    gradientBrush: Brush? = null,
 ) {
+    val finalModifier = if (gradientBrush == null) {
+        modifier
+    } else {
+        modifier.drawWithContent {
+            drawContent()
+            drawRect(brush = gradientBrush, blendMode = BlendMode.SrcIn)
+        }
+    }
     Text(
         text = text,
-        modifier = modifier,
+        modifier = finalModifier,
         textAlign = TextAlign.Center,
         fontFamily = fontFamily,
         fontStyle = if (italic) FontStyle.Italic else FontStyle.Normal,

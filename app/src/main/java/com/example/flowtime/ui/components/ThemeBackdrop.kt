@@ -10,7 +10,8 @@ import com.example.flowtime.ui.theme.ThemeMode
  * 玻璃拟态用夜航光斑场景（玻璃才有东西可借光），
  * 水彩画风用水彩晕染底，
  * 手绘涂鸦用笔记本纸页（横线 + 红边线 + 涂鸦），
- * 铅笔手绘用素描本纸纹（极淡点阵）。
+ * 铅笔手绘用素描本纸纹（极淡点阵），
+ * 现代渐变用深紫夜底 + 三团漂移柔光球。
  */
 @Composable
 fun ThemeBackdrop(modifier: Modifier = Modifier) {
@@ -19,6 +20,7 @@ fun ThemeBackdrop(modifier: Modifier = Modifier) {
         ThemeMode.DOODLE -> DoodleBackdrop(modifier)
         ThemeMode.WATERCOLOR -> WatercolorBloom(modifier)
         ThemeMode.SKETCH -> SketchBackdrop(modifier)
+        ThemeMode.GRADIENT -> GradientBackdrop(modifier)
         else -> {}
     }
 }
