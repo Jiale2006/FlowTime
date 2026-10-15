@@ -50,6 +50,7 @@ import com.example.flowtime.ui.theme.GlassBorderHigh
 import com.example.flowtime.ui.theme.GlassBottomShade
 import com.example.flowtime.ui.theme.GlassFillHigh
 import com.example.flowtime.ui.theme.Moonlight
+import com.example.flowtime.ui.theme.MonoGray300
 import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.PrimaryLight
 import com.example.flowtime.ui.theme.TextPrimary
@@ -95,8 +96,9 @@ fun RingTimer(
     // 其余主题的节奏等各自提示词到位后再单独调制。
     val mode = ActivePalette.mode
     val dimFadeMs = when (mode) {
-        // 玻璃拟态禁 duration-100/150：状态淡入淡出一律 500ms 流体缓动
-        ThemeMode.WATERCOLOR, ThemeMode.NOCTURNE -> 600
+        // 玻璃拟态禁 duration-100/150：状态淡入淡出一律 500ms 流体缓动；
+        // 单色极简：Deliberate Slowness（风格规范 duration-500~700 的慢节奏）
+        ThemeMode.WATERCOLOR, ThemeMode.NOCTURNE, ThemeMode.MONO -> 600
         else -> 300
     }
     val ringAlpha by animateFloatAsState(
@@ -340,7 +342,22 @@ fun RingTimer(
                         )
                     }
 
-                    // 单色极简无专属材质：通用主笔触已够（灰阶 gradient 由调色板提供）
+                    // 单色极简：Line Growth（风格规范「细线延展」）——
+                    // 进度弧外缘一根发丝线随进度延展，纯静态、灰阶相邻过渡
+                    ThemeMode.MONO -> {
+                        val lineIns = inset - strokePx * 0.38f
+                        drawArc(
+                            color = MonoGray300,
+                            startAngle = -90f,
+                            sweepAngle = sweep,
+                            useCenter = false,
+                            topLeft = Offset(lineIns, lineIns),
+                            size = Size(size.width - lineIns * 2, size.height - lineIns * 2),
+                            alpha = ringA,
+                            style = Stroke(width = strokePx * 0.08f, cap = StrokeCap.Round),
+                        )
+                    }
+
                     else -> {}
                 }
 
@@ -387,6 +404,8 @@ fun RingTimer(
             val tickFadeMs = when (mode) {
                 ThemeMode.WATERCOLOR -> 500
                 ThemeMode.NOCTURNE -> 250
+                // 单色极简：Deliberate Slowness（等宽数字等宽，交叉淡化不会错位）
+                ThemeMode.MONO -> 500
                 else -> 120
             }
             // 时钟容器宽度钉死在最宽组合上：AnimatedContent 交替时容器会在新旧
@@ -397,7 +416,8 @@ fun RingTimer(
             val density = LocalDensity.current
             val clockWidthDp = remember(mode, density) {
                 val clockStyle = TextStyle(
-                    fontFamily = FontFamily.Serif,
+                    // 单色极简走等宽数字（风格规范 token「等宽: font-mono」）
+                    fontFamily = if (mode == ThemeMode.MONO) FontFamily.Monospace else FontFamily.Serif,
                     fontStyle = if (mode == ThemeMode.WATERCOLOR) FontStyle.Italic else FontStyle.Normal,
                     fontSize = 64.sp,
                     fontWeight = FontWeight.Light,
@@ -451,6 +471,7 @@ fun RingTimer(
                             text = text,
                             color = timeColor,
                             italic = false,
+                            fontFamily = if (mode == ThemeMode.MONO) FontFamily.Monospace else FontFamily.Serif,
                             modifier = Modifier.width(clockWidthDp),
                         )
                     }
@@ -462,8 +483,8 @@ fun RingTimer(
 }
 
 /**
- * 时钟数字：衬线 Light + 宽字距。水彩走斜体（风格规则「文字使用衬线斜体」），
- * 其余主题正体，等各自提示词到位后再调。
+ * 时钟数字：默认衬线 Light + 宽字距。水彩走斜体（风格规则「文字使用衬线斜体」），
+ * 单色极简走等宽（font-mono），其余主题正体。
  */
 @Composable
 private fun ClockText(
@@ -471,12 +492,13 @@ private fun ClockText(
     color: Color,
     italic: Boolean,
     modifier: Modifier = Modifier,
+    fontFamily: FontFamily = FontFamily.Serif,
 ) {
     Text(
         text = text,
         modifier = modifier,
         textAlign = TextAlign.Center,
-        fontFamily = FontFamily.Serif,
+        fontFamily = fontFamily,
         fontStyle = if (italic) FontStyle.Italic else FontStyle.Normal,
         fontSize = 64.sp,
         fontWeight = FontWeight.Light,
