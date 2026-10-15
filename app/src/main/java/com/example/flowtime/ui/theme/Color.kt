@@ -368,6 +368,8 @@ val DisabledGray: Color get() = ActivePalette.disabledGray
 val TaskCardPalette: List<Pair<Color, Color>> get() = ActivePalette.taskCardPalette
 val NavContainer: Color get() = ActivePalette.navContainer
 val NavItemUnselected: Color get() = ActivePalette.navItemUnselected
+/** 弹窗/弹层容器色（比卡片更实一层，保证可读性）；底部弹层与渐隐遮罩都用它 */
+val DialogContainer: Color get() = ActivePalette.dialogContainer
 
 /** 旧品牌色名 → 当前调色板（水彩四色 / 夜航月光 / 涂鸦标记笔） */
 val WatercolorInk: Color get() = ActivePalette.ink
@@ -376,7 +378,12 @@ val WatercolorTeal: Color get() = ActivePalette.teal
 val WatercolorRose: Color get() = ActivePalette.rose
 val WatercolorSand: Color get() = ActivePalette.sand
 
-/** 历史别名（旧代码引用点保留） */
+/**
+ * 历史别名（旧代码引用点保留）。
+ * PaperElevated 的全部现存引用都是弹窗/弹层容器与滚轮渐隐遮罩，故指向
+ * dialogContainer（不透明、比卡片实一层）；此前错指 navContainer——
+ * 夜航主题下 navContainer 是 85% 透明的磨砂条底色，弹层会透出下层内容。
+ */
 val PaperBase: Color get() = ActivePalette.bgPrimary
 val PaperSoft: Color get() = ActivePalette.cardCream
-val PaperElevated: Color get() = ActivePalette.navContainer
+val PaperElevated: Color get() = ActivePalette.dialogContainer

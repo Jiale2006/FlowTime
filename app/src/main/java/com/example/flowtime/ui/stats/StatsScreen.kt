@@ -90,7 +90,7 @@ import com.example.flowtime.ui.theme.WarningAmber
  * 统计页（单页向下滚动）：
  * 范围切换（本周/本月/全部）+ 三卡总览 + 范围概览 + 专注趋势 + 时段分布
  * + 近 30 天热力图 + 分类分布 + 任务分布 + CSV 导出。
- * 三卡总览与导出保持全量语义，其余卡片跟随所选范围。
+ * 三卡总览保持全量语义；导出跟随所选范围（与统计口径一致），其余卡片也跟随所选范围。
  */
 @Composable
 fun StatsScreen(viewModel: AppViewModel) {

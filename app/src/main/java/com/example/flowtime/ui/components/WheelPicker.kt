@@ -285,7 +285,7 @@ fun HourMinuteWheel(
  *
  * 2026-10-09 定稿：**不再带快选 chip**——补录的主场景是"补昨天那一整段"，
  * 默认值由 `BackfillRules` 猜，多数时候不用碰滚轮；chip 反倒占掉本可以用来
- * 压缩弹层高度的空间。滚轮本身覆盖 0–8h 任意值。
+ * 压缩弹层高度的空间。滚轮本身覆盖 0–24h 任意值（上限见 `BackfillRules.MAX_MINUTES`）。
  */
 @Composable
 fun DurationWheelBlock(
