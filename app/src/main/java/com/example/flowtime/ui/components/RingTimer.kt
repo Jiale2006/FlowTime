@@ -1,6 +1,8 @@
 package com.example.flowtime.ui.components
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -508,8 +510,11 @@ fun RingTimer(
             val tickFadeMs = when (mode) {
                 ThemeMode.WATERCOLOR -> 500
                 ThemeMode.NOCTURNE -> 250
-                // 单色极简：Deliberate Slowness（等宽数字等宽，交叉淡化不会错位）
-                ThemeMode.MONO -> 500
+                // 单色极简：**硬切**（0 = 不做交叉淡化）。原来跟着规范抄了 500ms，
+                // 但数字每秒才变一次 —— 500ms 淡入 + 500ms 淡出等于新旧数字有一半
+                // 时间半透明叠印，且每次切换都打断上一次过渡，看着发虚"不干脆"。
+                // 秒表数字瞬时替换最清晰。（夜航当初就是为同一个坑从 500 收到 250。）
+                ThemeMode.MONO -> 0
                 // 现代渐变：transition-all duration-300 的节奏
                 ThemeMode.GRADIENT -> 300
                 else -> 120
@@ -552,8 +557,13 @@ fun RingTimer(
                     targetState = timeText,
                     contentAlignment = Alignment.Center,
                     transitionSpec = {
-                        fadeIn(tween(tickFadeMs, easing = FastOutSlowInEasing)) togetherWith
-                            fadeOut(tween(tickFadeMs, easing = FastOutSlowInEasing))
+                        if (tickFadeMs == 0) {
+                            // 硬切：不产生任何过渡帧 —— 数字瞬时替换（见 tickFadeMs 注释）
+                            EnterTransition.None togetherWith ExitTransition.None
+                        } else {
+                            fadeIn(tween(tickFadeMs, easing = FastOutSlowInEasing)) togetherWith
+                                fadeOut(tween(tickFadeMs, easing = FastOutSlowInEasing))
+                        }
                     },
                     label = "timeTick",
                 ) { text ->
