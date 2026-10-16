@@ -205,9 +205,13 @@ fun FlowTimeApp(viewModel: AppViewModel = viewModel()) {
         // 它最下面那排按钮就被画到正常位置的上方（这就是"闪"）。
         // 现在每个目的地自带容器，退出中的页面始终用它自己的内边距。
         Box(modifier = Modifier.fillMaxSize()) {
-            // 水彩晕染底挪进了每个页面容器（TabPage / FullPage）——
-            // 页面各自铺满不透明的纸色底后，切换那一帧新旧两页不会互相透出来，
-            // 整页作为一体出现（否则会出现"圈已经显示、上一页内容还在"的错位感）。
+            // 背景**全局只挂一层**（2026-10-16）：原来每个目的地各自挂 ThemeBackdrop，
+            // 切页时整层重建 → 粒子重新随机撒点、渐变光球相位从 0 重起，于是"每页一张新图"，
+            // 用户觉得三页背景不一样。提到 NavHost 外面后，所有页面共用同一张连续背景，
+            // 切页粒子不动、光球不停（也省掉每次切页重建 72 颗粒子的开销）。
+            // 🔴 因此页面容器（TabPage / FullPage）**不能再铺不透明底色** —— 那会盖住它；
+            // 整屏不透明由 Scaffold 的 containerColor = BgPrimary 兜底（单色极简等无场景层主题走它）。
+            ThemeBackdrop(Modifier.matchParentSize())
             NavHost(
             navController = navController,
             startDestination = Routes.TIMER,
@@ -224,8 +228,7 @@ fun FlowTimeApp(viewModel: AppViewModel = viewModel()) {
             popExitTransition = { ExitTransition.None },
         ) {
             composable(Routes.TIMER) {
-                // 只有计时页需要中心禁区：圆环 + 大号时间数字压在纵向约 38% 处
-                TabPage(innerPadding, keepOutCenterYFraction = 0.38f) {
+                TabPage(innerPadding) {
                 TimerScreen(
                     viewModel = viewModel,
                     onNavigateToTasks = {
@@ -313,23 +316,13 @@ fun FlowTimeApp(viewModel: AppViewModel = viewModel()) {
  * 页签页容器：吃 Scaffold 的 innerPadding（底部导航栏高度 + 系统安全区），
  * 保证内容不被底部导航栏遮住。
  *
- * 关键点：页面自带**不透明底 + 自己的水彩晕染底**。页面是"整块不透明"的，
- * 切换那一帧新页才会完整盖住旧页；否则页面透明的地方会透出上一页内容，
- * 观感上就像"某个元素（比如计时圆圈）比别人先显示出来"。
- *
- * @param keepOutCenterYFraction 透传给背景的中心禁区纵向比例（null = 不挖禁区）；
- *        只有计时页需要，见 [ThemeBackdrop] 的说明。
+ * 🔴 背景（水彩晕染 / 粒子网 / 渐变光球…）已**上提到 NavHost 外全局挂一层**，
+ * 这里**不再铺底** —— 铺了会把那层背景盖住。整屏不透明由 Scaffold 的
+ * `containerColor = BgPrimary` 兜底（单色极简这类没有场景层的主题就走它）。
  */
 @Composable
-private fun TabPage(
-    innerPadding: PaddingValues,
-    keepOutCenterYFraction: Float? = null,
-    content: @Composable () -> Unit,
-) {
-    Box(Modifier.fillMaxSize().background(BgPrimary)) {
-        ThemeBackdrop(Modifier.matchParentSize(), keepOutCenterYFraction)
-        Box(Modifier.fillMaxSize().padding(innerPadding)) { content() }
-    }
+private fun TabPage(innerPadding: PaddingValues, content: @Composable () -> Unit) {
+    Box(Modifier.fillMaxSize().padding(innerPadding)) { content() }
 }
 
 /**
@@ -338,11 +331,9 @@ private fun TabPage(
  * 关键点：容器属于「目的地自己」—— 切换时"正在退出"的那一页用的仍是它自己的内边距。
  * 之前把 padding 包在 NavHost 外面，退出中的详情页会被套上目标页（带导航栏）的内边距，
  * 于是它最下面那排按钮被画到正常位置上方约 80dp 的位置 —— 看起来就是"闪"。
+ * 背景同 [TabPage]：由 NavHost 外那一层全局背景负责，这里不铺底。
  */
 @Composable
 private fun FullPage(content: @Composable () -> Unit) {
-    Box(Modifier.fillMaxSize().background(BgPrimary)) {
-        ThemeBackdrop(Modifier.matchParentSize())
-        Box(Modifier.fillMaxSize().systemBarsPadding()) { content() }
-    }
+    Box(Modifier.fillMaxSize().systemBarsPadding()) { content() }
 }
