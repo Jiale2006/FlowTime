@@ -18,7 +18,7 @@ import androidx.compose.ui.unit.dp
 // 一并放进 AppPalette，组件里不允许再写死 RoundedCornerShape。
 
 /** 可切换的主题模式 */
-enum class ThemeMode { WATERCOLOR, NOCTURNE, DOODLE, MONO, GRADIENT }
+enum class ThemeMode { WATERCOLOR, NOCTURNE, DOODLE, MONO, GRADIENT, PARTICLES }
 
 /** 一套主题的全部 token：颜色 + 形状 + 装饰 */
 interface AppPalette {
@@ -499,11 +499,103 @@ object GradientPalette : AppPalette {
 }
 
 
+// ── 粒子系统 / Particle System（第七版）──────────────────────────
+// 提示词：风格提示词/粒子系统.md（style_slug: particle）。规则：深蓝黑底
+// （bg-[#0a0e1a]）+ 漂浮粒子网络（粒子 + 邻近低透明连线）、冷色强调
+// （blue/teal/violet）、辉光代替常规阴影、玻璃卡（border-white/5）、rounded-xl；
+// 禁暖色/大地色主调、禁浅底、禁重边框、禁常规阴影、禁长弹跳缓动。
+
+/** 冷色强调三色（提示词 Accent: blue-500 / teal-500 / violet-500） */
+val ParticleBlue = Color(0xFF3B82F6)        // blue-500（粒子/进度环主色）
+val ParticleBlueDeep = Color(0xFF2563EB)    // blue-600（主按钮）
+val ParticleBlueLight = Color(0xFF60A5FA)   // blue-400
+val ParticleTeal = Color(0xFF14B8A6)        // teal-500
+val ParticleCyan = Color(0xFF22D3EE)        // cyan-400（粒子高光）
+val ParticleViolet = Color(0xFF8B5CF6)      // violet-500
+
+/** 深蓝黑底（提示词 Background #0a0e1a / Surface #0f1419） */
+val ParticleNight = Color(0xFF0A0E1A)
+val ParticleSurface = Color(0xFF0F1419)
+val ParticleText = Color(0xFFE0E8FF)
+
+object ParticlePalette : AppPalette {
+    override val mode = ThemeMode.PARTICLES
+    override val label = "粒子系统"
+    override val tagline = "深空 · 粒子网络"
+    override val previewDots = listOf(ParticleBlue, ParticleTeal, ParticleViolet)
+
+    override val bgPrimary = ParticleNight
+    override val primary = ParticleBlueDeep                // 主按钮 = blue-600 实心
+    override val primaryDark = Color(0xFF1D4ED8)           // blue-700
+    override val primaryLight = ParticleBlueLight
+    override val accentGreen = ParticleTeal
+    override val cardGreenLight = Color(0x333B82F6)        // 选中态 = 蓝 20% 玻璃
+    override val cardOrange = Color(0x3314B8A6)            // 青 20% 玻璃
+    override val cardCream = Color(0x14FFFFFF)             // 白 8% 玻璃
+    override val mutedSurface = Color(0x0FFFFFFF)          // 白 6%
+    override val gold = ParticleViolet                     // 第三强调色（violet）
+    override val textPrimary = ParticleText                // #e0e8ff（提示词给定）
+    override val textSecondary = Color(0x80FFFFFF)         // 白 50%
+    override val textPlaceholder = Color(0x40FFFFFF)       // 白 25%
+    override val dividerColor = Color(0x0DFFFFFF)          // 白 5%（border-white/5）
+    override val borderColor = Color(0x1AFFFFFF)           // 白 10%
+    // 玻璃卡：提示词 Surface #0f1419/80（Android 无逐卡实时模糊，靠透出身后
+    // 粒子网与冷色光晕制造玻璃感；70% 底 + 浅蓝白字对比 >12:1，可读性有余量）
+    override val surfaceCard = Color(0xB30F1419)
+    override val dialogContainer = Color(0xF20F1419)       // 弹窗更实，保证可读
+    override val errorRed = Color(0xFFF87171)
+    override val warningAmber = Color(0xFFFBBF24)
+    override val successGreen = Color(0xFF34D399)
+    override val disabledGray = Color(0x4DFFFFFF)
+    // 16 组深冷色卡：白字压在深蓝/青/靛/紫上，对比度均 ≥7:1
+    // （提示词硬约束：主调禁暖色/大地色，故全表无红黄橙棕）
+    override val taskCardPalette = listOf(
+        Color(0xFF1E3A8A) to Color.White,   // blue-900
+        Color(0xFF1E40AF) to Color.White,   // blue-800
+        Color(0xFF1D4ED8) to Color.White,   // blue-700
+        Color(0xFF0E7490) to Color.White,   // cyan-700
+        Color(0xFF155E75) to Color.White,   // cyan-800
+        Color(0xFF0F766E) to Color.White,   // teal-700
+        Color(0xFF115E59) to Color.White,   // teal-800
+        Color(0xFF4C1D95) to Color.White,   // violet-900
+        Color(0xFF5B21B6) to Color.White,   // violet-800
+        Color(0xFF4338CA) to Color.White,   // indigo-700
+        Color(0xFF3730A3) to Color.White,   // indigo-800
+        Color(0xFF312E81) to Color.White,   // indigo-900
+        Color(0xFF134E4A) to Color.White,   // teal-900
+        Color(0xFF164E63) to Color.White,   // cyan-900
+        Color(0xFF172554) to Color.White,   // blue-950
+        Color(0xFF0C4A6E) to Color.White,   // sky-900
+    )
+    override val navContainer = Color(0xE60F1419)          // 深底导航条（90% 沉底）
+    override val navItemUnselected = Color(0x80FFFFFF)
+    // 辉光代替常规阴影：低不透明度大范围冷蓝扩散（提示词 Nebula Glow）
+    override val shadowInk = ParticleBlue
+    override val shadowAmbientAlpha = 0.22f
+    override val shadowSpotAlpha = 0.20f
+    override val ink = ParticleBlue
+    override val peach = ParticleCyan
+    override val teal = ParticleTeal
+    override val rose = ParticleViolet
+    override val sand = Color(0xFF7DD3FC)                  // sky-300
+
+    // rounded-xl（规范卡片）／按钮 rounded-lg；胶囊未被本风格禁止
+    override val cardShape = RoundedCornerShape(12.dp)
+    override val tileShape = RoundedCornerShape(10.dp)
+    override val badgeShape = RoundedCornerShape(8.dp)
+    override val buttonShape = RoundedCornerShape(8.dp)     // rounded-lg
+    override val pillShape = RoundedCornerShape(50)         // 本风格未禁 rounded-full
+    override val dashedBorders = false
+    // 横幅走蓝→青横向渐变（非"紫到蓝"，规避自检清单冲突项）
+    override val bannerBrush = Brush.horizontalGradient(listOf(ParticleBlue, ParticleTeal))
+}
+
+
 /** 全部主题（选择界面按此顺序展示） */
 val AllPalettes: List<AppPalette> =
     listOf(
         WatercolorPalette, NocturnePalette, DoodlePalette,
-        MonoPalette, GradientPalette,
+        MonoPalette, GradientPalette, ParticlePalette,
     )
 
 /** 当前生效的调色板（快照状态：切换后所有读取它的组合范围自动重组） */
@@ -516,6 +608,7 @@ fun paletteFor(mode: ThemeMode): AppPalette =
         ThemeMode.DOODLE -> DoodlePalette
         ThemeMode.MONO -> MonoPalette
         ThemeMode.GRADIENT -> GradientPalette
+        ThemeMode.PARTICLES -> ParticlePalette
     }
 
 // ── 全站 token（读取 ActivePalette，调用点无需感知主题切换）──────

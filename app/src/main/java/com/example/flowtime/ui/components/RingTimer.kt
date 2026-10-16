@@ -62,6 +62,7 @@ import com.example.flowtime.ui.theme.GradVioletLight
 import com.example.flowtime.ui.theme.Moonlight
 import com.example.flowtime.ui.theme.MonoGray200
 import com.example.flowtime.ui.theme.MonoInk
+import com.example.flowtime.ui.theme.ParticleBlue
 import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.PrimaryLight
 import com.example.flowtime.ui.theme.TextPrimary
@@ -76,6 +77,12 @@ import kotlin.math.sin
  * 与其余主题 14dp 的"管"无关，故单独定义，不跟随 strokeWidth 形参。
  */
 private val MonoLineWidth = 2.dp
+
+/**
+ * 粒子系统的环线宽：**冷蓝细环**（用户 2026-10-16 选的 2B 方案 —— 精密仪器感，
+ * 不是其余主题 14dp 的"管"），同样与 strokeWidth 形参无关，单独定义。
+ */
+private val ParticleLineWidth = 3.dp
 
 /**
  * 环形倒计时（教程 §3.1）：底色弧 + 渐变进度弧，圆角线帽，弧首定位点，中央大号时间。
@@ -115,6 +122,8 @@ fun RingTimer(
     val strokePx = with(LocalDensity.current) { strokeWidth.toPx() }
     // 单色极简专属：2dp 细线的像素宽（环中线位置仍沿用 inset，与外主题对齐）
     val monoLinePx = with(LocalDensity.current) { MonoLineWidth.toPx() }
+    // 粒子系统专属：3dp 细环 + 外缘辉光的像素宽
+    val particleLinePx = with(LocalDensity.current) { ParticleLineWidth.toPx() }
     val clamped = progress.coerceIn(0f, 1f)
 
     // ---- 主题动效参数：水彩=液态缓动（≥500ms ease-in-out，禁快速缓动）----
@@ -126,6 +135,9 @@ fun RingTimer(
         ThemeMode.WATERCOLOR, ThemeMode.NOCTURNE, ThemeMode.MONO -> 600
         // 现代渐变：Zero-Gravity Float 的 duration-500 + ease-out 节奏
         ThemeMode.GRADIENT -> 500
+        // 粒子系统：Quantum Snap —— 提示词要求前景反馈精确快速（duration-150~200）。
+        // 这条只管"控件级状态反馈"（暂停/恢复的整体降透明），跳秒数字另算（见 tickFadeMs）。
+        ThemeMode.PARTICLES -> 200
         else -> 300
     }
     val ringAlpha by animateFloatAsState(
@@ -139,6 +151,10 @@ fun RingTimer(
         // 单色极简：恒墨黑。一根线不随进度变色，收尾也不偏色 ——
         // 原来会把 else 分支的 WatercolorRose（粉红）引进单色主题，属色相污染。
         MonoInk
+    } else if (mode == ThemeMode.PARTICLES) {
+        // 粒子系统：恒冷蓝（用户选的是"单色冷蓝细环"）。收尾不引暖色 ——
+        // 提示词禁暖色/大地色主调，红粉会直接破掉"深空"的冷。
+        ParticleBlue
     } else {
         val pigmentP = pigmentProgress.coerceIn(0f, 1f)
         // 现代渐变的进度就是它的招牌：紫 → 品红一路推过去。
@@ -217,6 +233,18 @@ fun RingTimer(
                     size = arcSize,
                     style = Stroke(width = strokePx, cap = StrokeCap.Round),
                 )
+            } else if (mode == ThemeMode.PARTICLES) {
+                // 粒子系统（2B）：底轨 = 一根极淡冷蓝细线，整圈、圆头。
+                // 只用来交代"总时长有多长"；屏幕上唯一的亮点是上面那条带外缘辉光的进度弧。
+                drawArc(
+                    color = ParticleBlue.copy(alpha = 0.16f * ringA),
+                    startAngle = 0f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = particleLinePx, cap = StrokeCap.Round),
+                )
             } else if (mode == ThemeMode.MONO) {
                 // 单色极简：底轨 = 一根极浅灰细线（#E5E5E5），整圈、平头。
                 // 只用来交代"总时长有多长"，上面压的墨黑线才是进度。
@@ -248,10 +276,10 @@ fun RingTimer(
                     colors = listOf(pigmentLight, pigmentBase, pigmentLight),
                     center = center,
                 )
-                // 主笔触（玻璃拟态走"管内液体光"、现代渐变走三色 sweep、单色极简走单根细线，
-                // 三者都不叠这条通用粗主笔）
+                // 主笔触（玻璃拟态走"管内液体光"、现代渐变走三色 sweep、单色极简走单根细线、
+                // 粒子系统走带辉光的冷蓝细环，四者都不叠这条通用粗主笔）
                 if (mode != ThemeMode.NOCTURNE && mode != ThemeMode.GRADIENT &&
-                    mode != ThemeMode.MONO
+                    mode != ThemeMode.MONO && mode != ThemeMode.PARTICLES
                 ) {
                     drawArc(
                         brush = gradient,
@@ -426,6 +454,34 @@ fun RingTimer(
                         )
                     }
 
+                    // 粒子系统（2B）：冷蓝细环 + 外缘一圈极淡辉光，精密仪器感。
+                    // 不叠渐变、不加弧首能量核 —— 环上动态一律不做（2026-10-14 定的环区纯静态）。
+                    ThemeMode.PARTICLES -> {
+                        // 外缘辉光：同色、更宽、更淡的一道弧，托在进度弧外侧。
+                        // 用单层而非多层同心弧 —— 多层硬边叠出来的亮度剖面是台阶状，放大能数出圈数。
+                        val glowIns = inset - particleLinePx * 0.55f
+                        drawArc(
+                            color = ParticleBlue.copy(alpha = 0.20f * ringA),
+                            startAngle = -90f,
+                            sweepAngle = sweep,
+                            useCenter = false,
+                            topLeft = Offset(glowIns, glowIns),
+                            size = Size(size.width - glowIns * 2, size.height - glowIns * 2),
+                            style = Stroke(width = particleLinePx * 3.2f, cap = StrokeCap.Round),
+                        )
+                        // 进度细线本体
+                        drawArc(
+                            color = pigmentBase,
+                            startAngle = -90f,
+                            sweepAngle = sweep,
+                            useCenter = false,
+                            topLeft = topLeft,
+                            size = arcSize,
+                            alpha = ringA,
+                            style = Stroke(width = particleLinePx, cap = StrokeCap.Round),
+                        )
+                    }
+
                     // 现代渐变：紫→品红→青的三色 sweep 渐变（规范 COLOR COMBO
                     // 「from-violet-500 via-fuchsia-500 to-cyan-500」）+ 贴内缘一道白色受光高光
                     ThemeMode.GRADIENT -> {
@@ -489,8 +545,9 @@ fun RingTimer(
                         radius = strokePx * 0.26f,
                         center = headCenter,
                     )
-                } else if (mode != ThemeMode.MONO) {
-                    // 弧首圆点。单色极简被上面的条件排除：用户要"就是一根线"，不留端点
+                } else if (mode != ThemeMode.MONO && mode != ThemeMode.PARTICLES) {
+                    // 弧首圆点。单色极简被上面的条件排除：用户要"就是一根线"，不留端点；
+                    // 粒子系统同理（2B 方案只要冷蓝细环 + 外缘辉光，不要能量核）
                     drawCircle(
                         color = pigmentBase.copy(alpha = 0.75f * ringA),
                         radius = strokePx * 0.52f,
@@ -523,6 +580,9 @@ fun RingTimer(
                 ThemeMode.MONO -> 0
                 // 现代渐变：transition-all duration-300 的节奏
                 ThemeMode.GRADIENT -> 300
+                // 粒子系统也走下面的 120：提示词的 duration-150~200 是给**控件交互**的，
+                // 跳秒数字每秒才变一次，套 200ms 就有 20% 时间新旧数字半透明叠印
+                //（单色极简已因同一个坑从 500 收到硬切）。控件级节奏见 dimFadeMs。
                 else -> 120
             }
             // 时钟容器宽度钉死在最宽组合上：AnimatedContent 交替时容器会在新旧
@@ -536,6 +596,8 @@ fun RingTimer(
                     // 单色极简走等宽（font-mono）；现代渐变走无衬线（规范全站无衬线）
                     fontFamily = when (mode) {
                         ThemeMode.MONO -> FontFamily.Monospace
+                        // 粒子系统：等宽（提示词 font-mono）—— 科技感，跳秒也不抖
+                        ThemeMode.PARTICLES -> FontFamily.Monospace
                         ThemeMode.GRADIENT -> FontFamily.SansSerif
                         else -> FontFamily.Serif
                     },
@@ -604,6 +666,7 @@ fun RingTimer(
                             italic = false,
                             fontFamily = when (mode) {
                                 ThemeMode.MONO -> FontFamily.Monospace
+                                ThemeMode.PARTICLES -> FontFamily.Monospace
                                 ThemeMode.GRADIENT -> FontFamily.SansSerif
                                 else -> FontFamily.Serif
                             },

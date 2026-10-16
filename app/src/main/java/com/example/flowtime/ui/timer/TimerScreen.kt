@@ -156,7 +156,12 @@ fun TimerScreen(
         // 环境漂浮粒子：**铺满整页**（挂在外层 Box 的第一个子元素 = 绘制在 Column 之前，
         // 永远在 UI 之下）—— 所以任务卡/按钮会遮住一部分，是"背景浮尘"而不是"屏幕飞屑"，
         // 不会干扰读数。水彩主题有自己的画（芦苇河），粒子层跳过它。
-        if (!isIdle && !reducedMotion && ActivePalette.mode != ThemeMode.WATERCOLOR) {
+        // 粒子系统主题同理跳过：它自带 ParticleNetBackdrop 粒子网，两套粒子同屏会互相抢戏
+        //（提示词明令禁止 "patterns that compete with particle animation"）。
+        if (!isIdle && !reducedMotion &&
+            ActivePalette.mode != ThemeMode.WATERCOLOR &&
+            ActivePalette.mode != ThemeMode.PARTICLES
+        ) {
             AmbientParticles(
                 state = ambient,
                 active = timer.phase == AppViewModel.TimerPhase.RUNNING,

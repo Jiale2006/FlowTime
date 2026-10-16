@@ -41,6 +41,7 @@ fun FlowTimeTheme(
         ThemeMode.WATERCOLOR -> watercolorScheme(palette)
         ThemeMode.MONO -> monoScheme(palette)
         ThemeMode.GRADIENT -> gradientScheme(palette)
+        ThemeMode.PARTICLES -> particleScheme(palette)
     }
     SceneSystemBarsEffect(palette)
     MaterialTheme(
@@ -163,6 +164,33 @@ private fun gradientScheme(p: AppPalette) = darkColorScheme(
     surfaceContainer = Color(0xFF1E1B4B),
     surfaceContainerHigh = Color(0xFF2A2159),
     surfaceContainerHighest = Color(0xFF342A6B),
+    outline = p.dividerColor,
+    outlineVariant = p.borderColor,
+    error = p.errorRed,
+)
+
+/** 粒子系统（深蓝黑底；基于 darkColorScheme，容器档取蓝黑阶）*/
+private fun particleScheme(p: AppPalette) = darkColorScheme(
+    primary = p.primary,
+    onPrimary = Color.White,
+    primaryContainer = p.cardGreenLight,
+    onPrimaryContainer = p.textPrimary,
+    secondary = p.accentGreen,
+    onSecondary = Color(0xFF04211F),
+    secondaryContainer = Color(0x3314B8A6),
+    onSecondaryContainer = Color(0xFFCCFBF1),
+    tertiary = p.gold,
+    onTertiary = Color.White,
+    background = p.bgPrimary,
+    onBackground = p.textPrimary,
+    surface = p.surfaceCard,
+    onSurface = p.textPrimary,
+    surfaceVariant = p.cardCream,
+    onSurfaceVariant = p.textSecondary,
+    surfaceContainerLow = Color(0xFF0D1320),
+    surfaceContainer = Color(0xFF0F1419),
+    surfaceContainerHigh = Color(0xFF161D2B),
+    surfaceContainerHighest = Color(0xFF1E2738),
     outline = p.dividerColor,
     outlineVariant = p.borderColor,
     error = p.errorRed,
@@ -341,6 +369,42 @@ private fun typographyFor(mode: ThemeMode): Typography = when (mode) {
             fontSize = 12.sp, lineHeight = 18.sp,
         ),
     )
+    // 粒子系统：全站无衬线（提示词 font-sans font-semibold 标题 / text-sm 正文），
+    // 科技感靠字重与字距，不靠衬线
+    ThemeMode.PARTICLES -> Typography(
+        headlineLarge = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold,
+            fontSize = 28.sp, lineHeight = 36.sp,
+        ),
+        headlineMedium = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold,
+            fontSize = 24.sp, lineHeight = 32.sp,
+        ),
+        headlineSmall = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold,
+            fontSize = 20.sp, lineHeight = 28.sp,
+        ),
+        titleLarge = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold,
+            fontSize = 20.sp, lineHeight = 28.sp,
+        ),
+        titleMedium = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Medium,
+            fontSize = 16.sp, lineHeight = 24.sp,
+        ),
+        bodyLarge = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal,
+            fontSize = 16.sp, lineHeight = 24.sp,
+        ),
+        bodyMedium = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal,
+            fontSize = 14.sp, lineHeight = 22.sp,
+        ),
+        bodySmall = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal,
+            fontSize = 12.sp, lineHeight = 18.sp,
+        ),
+    )
     else -> Typography
 }
 
@@ -371,6 +435,14 @@ private fun shapesFor(mode: ThemeMode): Shapes = when (mode) {
         large = RoundedCornerShape(24.dp),      // rounded-3xl
         extraLarge = RoundedCornerShape(28.dp),
     )
+    // 粒子系统：rounded-xl 卡片 / rounded-lg 按钮（提示词 Token 字典）
+    ThemeMode.PARTICLES -> Shapes(
+        extraSmall = RoundedCornerShape(8.dp),
+        small = RoundedCornerShape(8.dp),       // rounded-lg
+        medium = RoundedCornerShape(10.dp),
+        large = RoundedCornerShape(12.dp),      // rounded-xl
+        extraLarge = RoundedCornerShape(16.dp),
+    )
     else -> Shapes()
 }
 
@@ -384,8 +456,10 @@ private fun SceneSystemBarsEffect(palette: AppPalette) {
     SideEffect {
         val activity = view.context as? ComponentActivity ?: return@SideEffect
         val window = activity.window
-        // 深色主题（夜航 / 现代渐变）→ 浅色系统图标；窗口底色取各自的主题底，冷启动不闪错色
-        if (palette.mode == ThemeMode.NOCTURNE || palette.mode == ThemeMode.GRADIENT) {
+        // 深色主题（夜航 / 现代渐变 / 粒子系统）→ 浅色系统图标；窗口底色取各自的主题底，冷启动不闪错色
+        if (palette.mode == ThemeMode.NOCTURNE || palette.mode == ThemeMode.GRADIENT ||
+            palette.mode == ThemeMode.PARTICLES
+        ) {
             window.setBackgroundDrawable(ColorDrawable(palette.bgPrimary.toArgb()))
             activity.enableEdgeToEdge(
                 statusBarStyle = SystemBarStyle.dark(Color.Transparent.toArgb()),
