@@ -58,7 +58,8 @@ import com.example.flowtime.ui.theme.GradFuchsia
 import com.example.flowtime.ui.theme.GradViolet
 import com.example.flowtime.ui.theme.GradVioletLight
 import com.example.flowtime.ui.theme.Moonlight
-import com.example.flowtime.ui.theme.MonoGray300
+import com.example.flowtime.ui.theme.MonoGray200
+import com.example.flowtime.ui.theme.MonoInk
 import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.PrimaryLight
 import com.example.flowtime.ui.theme.TextPrimary
@@ -67,6 +68,12 @@ import com.example.flowtime.ui.theme.WatercolorInk
 import com.example.flowtime.ui.theme.WatercolorRose
 import kotlin.math.cos
 import kotlin.math.sin
+
+/**
+ * 单色极简的计时线宽：**计时就是单色的一根线**（用户 2026-10-16 定），
+ * 与其余主题 14dp 的"管"无关，故单独定义，不跟随 strokeWidth 形参。
+ */
+private val MonoLineWidth = 2.dp
 
 /**
  * 环形倒计时（教程 §3.1）：底色弧 + 渐变进度弧，圆角线帽，弧首定位点，中央大号时间。
@@ -80,6 +87,7 @@ import kotlin.math.sin
  *    环形区不再持续重绘，只在 progress 变化时重组。
  *
  * 主题字形差异：水彩 = 衬线斜体数字 + 水墨洇边；其余主题 = 直立衬线。
+ * 单色极简的环 = **一根 2dp 墨黑线**：极浅灰底轨 + 墨黑进度线，无端点标记、恒色不偏色。
  */
 @Composable
 fun RingTimer(
@@ -98,6 +106,8 @@ fun RingTimer(
     centerContent: (@Composable () -> Unit)? = null,
 ) {
     val strokePx = with(LocalDensity.current) { strokeWidth.toPx() }
+    // 单色极简专属：2dp 细线的像素宽（环中线位置仍沿用 inset，与外主题对齐）
+    val monoLinePx = with(LocalDensity.current) { MonoLineWidth.toPx() }
     val clamped = progress.coerceIn(0f, 1f)
 
     // ---- 主题动效参数：水彩=液态缓动（≥500ms ease-in-out，禁快速缓动）----
@@ -118,7 +128,11 @@ fun RingTimer(
     )
 
     // ---- 颜料色：随剩余时间流动（颜料进度 0→1 即剩余时间 1→0）----
-    val pigmentBase = run {
+    val pigmentBase = if (mode == ThemeMode.MONO) {
+        // 单色极简：恒墨黑。一根线不随进度变色，收尾也不偏色 ——
+        // 原来会把 else 分支的 WatercolorRose（粉红）引进单色主题，属色相污染。
+        MonoInk
+    } else {
         val pigmentP = pigmentProgress.coerceIn(0f, 1f)
         // 现代渐变的进度就是它的招牌：紫 → 品红一路推过去。
         val settled = when (mode) {
@@ -196,6 +210,18 @@ fun RingTimer(
                     size = arcSize,
                     style = Stroke(width = strokePx, cap = StrokeCap.Round),
                 )
+            } else if (mode == ThemeMode.MONO) {
+                // 单色极简：底轨 = 一根极浅灰细线（#E5E5E5），整圈、平头。
+                // 只用来交代"总时长有多长"，上面压的墨黑线才是进度。
+                drawArc(
+                    color = MonoGray200.copy(alpha = 0.9f * ringA),
+                    startAngle = 0f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    topLeft = topLeft,
+                    size = arcSize,
+                    style = Stroke(width = monoLinePx, cap = StrokeCap.Butt),
+                )
             } else {
                 drawArc(
                     color = CardGreenLight.copy(alpha = 0.7f * ringA),
@@ -215,8 +241,11 @@ fun RingTimer(
                     colors = listOf(pigmentLight, pigmentBase, pigmentLight),
                     center = center,
                 )
-                // 主笔触（玻璃拟态走"管内液体光"、现代渐变走三色 sweep，都不叠通用主笔）
-                if (mode != ThemeMode.NOCTURNE && mode != ThemeMode.GRADIENT) {
+                // 主笔触（玻璃拟态走"管内液体光"、现代渐变走三色 sweep、单色极简走单根细线，
+                // 三者都不叠这条通用粗主笔）
+                if (mode != ThemeMode.NOCTURNE && mode != ThemeMode.GRADIENT &&
+                    mode != ThemeMode.MONO
+                ) {
                     drawArc(
                         brush = gradient,
                         startAngle = -90f,
@@ -374,19 +403,19 @@ fun RingTimer(
                         )
                     }
 
-                    // 单色极简：Line Growth（风格规范「细线延展」）——
-                    // 进度弧外缘一根发丝线随进度延展，纯静态、灰阶相邻过渡
+                    // 单色极简：**计时就是单色的一根线**（用户 2026-10-16 定）。
+                    // 2dp 墨黑细线自顶部顺时针生长，平头、无渐变、无端点圆点；
+                    // 全程恒色（规范：禁一切色相 / Line Growth 细线延展）。
                     ThemeMode.MONO -> {
-                        val lineIns = inset - strokePx * 0.38f
                         drawArc(
-                            color = MonoGray300,
+                            color = pigmentBase,
                             startAngle = -90f,
                             sweepAngle = sweep,
                             useCenter = false,
-                            topLeft = Offset(lineIns, lineIns),
-                            size = Size(size.width - lineIns * 2, size.height - lineIns * 2),
+                            topLeft = topLeft,
+                            size = arcSize,
                             alpha = ringA,
-                            style = Stroke(width = strokePx * 0.08f, cap = StrokeCap.Round),
+                            style = Stroke(width = monoLinePx, cap = StrokeCap.Butt),
                         )
                     }
 
@@ -453,7 +482,8 @@ fun RingTimer(
                         radius = strokePx * 0.26f,
                         center = headCenter,
                     )
-                } else {
+                } else if (mode != ThemeMode.MONO) {
+                    // 弧首圆点。单色极简被上面的条件排除：用户要"就是一根线"，不留端点
                     drawCircle(
                         color = pigmentBase.copy(alpha = 0.75f * ringA),
                         radius = strokePx * 0.52f,
