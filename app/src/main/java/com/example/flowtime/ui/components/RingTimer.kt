@@ -90,6 +90,11 @@ private val MonoLineWidth = 2.dp
  *
  * 主题字形差异：水彩 = 衬线斜体数字 + 水墨洇边；其余主题 = 直立衬线。
  * 单色极简的环 = **一根 2dp 墨黑线**：极浅灰底轨 + 墨黑进度线，无端点标记、恒色不偏色。
+ *
+ * ⚠️ **水彩根本不经过本组件**：`TimerScreen.kt` 里 `mode == WATERCOLOR` 走的是 `ReedPaintingTimer`。
+ *    所以本文件内所有 `ThemeMode.WATERCOLOR` 分支都是**死代码**（`dimFadeMs` 条目 / Canvas 水彩补笔 /
+ *    `tickFadeMs` 的 500 / 时钟字体 / 数字水墨洇影副本，共 5 处）。**保留 ≠ 有效**，
+ *    不要照它们推导水彩的实际观感（2026-10-16 已因 `tickFadeMs = 500` 误判过一次）。
  */
 @Composable
 fun RingTimer(
@@ -508,6 +513,7 @@ fun RingTimer(
             // 玻璃=250ms —— 跳秒是每秒高频更新，motion.md 要求频繁交互少动效，
             // 500ms 交叉淡化会让新旧数字长时间叠印重影，250ms 一闪即过
             val tickFadeMs = when (mode) {
+                // ⚠️ 死值（水彩走 ReedPaintingTimer，见文件头说明）
                 ThemeMode.WATERCOLOR -> 500
                 ThemeMode.NOCTURNE -> 250
                 // 单色极简：**硬切**（0 = 不做交叉淡化）。原来跟着规范抄了 500ms，
