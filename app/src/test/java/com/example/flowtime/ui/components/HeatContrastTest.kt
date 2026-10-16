@@ -4,7 +4,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.AllPalettes
-import com.example.flowtime.ui.theme.NocturnePalette
 import org.junit.After
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -70,16 +69,25 @@ class HeatContrastTest {
     }
 
     @Test
-    fun `夜航主题是深底浅字 纸主题是浅底深字`() {
-        ActivePalette = NocturnePalette
-        assertTrue("夜航的无记录格应该用浅色字", inkOn(heatColorOf(0)).luminance() > 0.5f)
-
-        AllPalettes.filter { it.mode.name != "NOCTURNE" }.forEach { palette ->
+    fun `无记录格的字色跟着底色走 深底用浅字 纸底用深字`() {
+        AllPalettes.forEach { palette ->
             ActivePalette = palette
-            assertTrue(
-                "${palette.label} 的无记录格应该用深色字",
-                inkOn(heatColorOf(0)).luminance() < 0.5f,
-            )
+            val inkLum = inkOn(heatColorOf(0)).luminance()
+            // 判据不写死主题名单，而是按**页面底色本身的明暗**分派。
+            // 原来那条断言的前提是"夜航是唯一深底主题"—— 深底主题涨到 3 个
+            //（夜航 / 现代渐变 / 粒子系统）之后，白名单式写法必然误报：
+            // 深底上无记录格**注定**用白字，而白字恰恰是对的。
+            if (palette.bgPrimary.luminance() < 0.5f) {
+                assertTrue(
+                    "${palette.label} 是深底主题，无记录格应该用浅色字（实得 luminance=$inkLum）",
+                    inkLum > 0.5f,
+                )
+            } else {
+                assertTrue(
+                    "${palette.label} 是浅底主题，无记录格应该用深色字（实得 luminance=$inkLum）",
+                    inkLum < 0.5f,
+                )
+            }
         }
     }
 }

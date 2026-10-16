@@ -95,7 +95,7 @@ class ParticleNetState internal constructor() {
     /**
      * 铺满粒子（只在画布就绪后调一次）。reduced-motion 下这就是最终画面。
      */
-    internal fun seed(density: Float, keepOutCenterYFraction: Float) {
+    internal fun seed(density: Float, keepOutCenterYFraction: Float?) {
         val w = viewport.width
         val h = viewport.height
         if (w == 0 || h == 0) return
@@ -111,7 +111,7 @@ class ParticleNetState internal constructor() {
      *
      * @param dt 帧间隔，**秒**（已由调用方从纳秒折算并夹住上限，避免掉帧时瞬移）。
      */
-    internal fun step(dt: Float, keepOutCenterYFraction: Float) {
+    internal fun step(dt: Float, keepOutCenterYFraction: Float?) {
         val w = viewport.width
         val h = viewport.height
         if (w == 0 || h == 0) return
@@ -134,8 +134,14 @@ class ParticleNetState internal constructor() {
      * 中心禁区不是"墙"而是"雾"（沿用 Effects.kt 的结论）：粒子飘进内容区不删除，
      * 只把亮度压到 0.12×，到 keepOutR × 1.35 处恢复全亮 ——
      * 既不在时间数字上留亮点，又不会在画面中间挖出一道空洞。
+     *
+     * @param yFraction 禁区圆心纵向比例；**null = 该页面不挖禁区**，全部粒子恒全亮。
      */
-    private fun updateDims(w: Int, h: Int, yFraction: Float) {
+    private fun updateDims(w: Int, h: Int, yFraction: Float?) {
+        if (yFraction == null) {
+            for (d in dots) d.dim = 1f
+            return
+        }
         val (cx, cy, keepOutR) = keepOutCenter(w, h, yFraction)
         for (d in dots) {
             val dx = d.x - cx
@@ -182,13 +188,16 @@ class ParticleNetState internal constructor() {
 fun rememberParticleNetState(): ParticleNetState = remember { ParticleNetState() }
 
 /**
- * @param keepOutCenterYFraction 中心内容禁区的圆心纵向比例。整页铺满时画布中心
- *        不等于圆环/数字中心，默认取 0.38（计时页圆环所在的纵向位置）。
+ * @param keepOutCenterYFraction 中心内容禁区的圆心纵向比例；**null = 不挖禁区**。
+ *        禁区的意义是"别让粒子和连线压在大号时间数字上"—— **只有计时页需要**，
+ *        所以由调用方给。（原来在这里写死默认 0.38：统计页/设置页会在 38% 高度处
+ *        被凭空压暗一团无意义的雾，而真正的内容反而不受保护。）
+ *        非 null 时传圆环实际所在的纵向比例（计时页是 0.38）。
  */
 @Composable
 fun ParticleNetBackdrop(
     modifier: Modifier = Modifier,
-    keepOutCenterYFraction: Float = 0.38f,
+    keepOutCenterYFraction: Float? = null,
 ) {
     val density = LocalDensity.current.density
     val reducedMotion = rememberReducedMotion()
@@ -269,7 +278,7 @@ fun ParticleNetBackdrop(
         }
     }
 
-    LaunchedEffect(reducedMotion) {
+    LaunchedEffect(reducedMotion, keepOutCenterYFraction) {
         while (state.viewport == IntSize.Zero) {
             withFrameNanos { }
         }

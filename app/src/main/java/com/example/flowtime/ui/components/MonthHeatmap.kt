@@ -32,11 +32,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.flowtime.ui.AppViewModel
-import com.example.flowtime.ui.theme.AccentGreen
+import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.BgPrimary
-import com.example.flowtime.ui.theme.CardCream
-import com.example.flowtime.ui.theme.Primary
-import com.example.flowtime.ui.theme.PrimaryLight
 import com.example.flowtime.ui.theme.SurfaceCard
 import com.example.flowtime.ui.theme.TextPlaceholder
 import com.example.flowtime.ui.theme.TextSecondary
@@ -44,15 +41,14 @@ import java.time.LocalDate
 
 internal val WeekLabels = listOf("一", "二", "三", "四", "五", "六", "日")
 
-/** 色阶图例（由浅到深，与 heatColor 一一对应）；读取器形式，主题切换时取到当前色 */
+/**
+ * 色阶图例（由浅到深，与 [heatColorOf] 一一对应）；读取器形式，主题切换时取到当前色。
+ *
+ * 🔴 直接复用 [ActivePalette.heatRamp] —— 这里原来**又抄了一份**同样的五档色，
+ *    深底主题改成不透明色阶后两份必然对不上（图例一个紫、格子另一个紫）。
+ */
 private val HeatLegend: List<Color>
-    get() = listOf(
-        CardCream,
-        AccentGreen.copy(alpha = 0.35f),
-        AccentGreen.copy(alpha = 0.55f),
-        PrimaryLight.copy(alpha = 0.6f),
-        Primary.copy(alpha = 0.75f),
-    )
+    get() = ActivePalette.heatRamp
 
 /**
  * 一个月热力图：7 列（一~日）× 若干行圆角格子，颜色深浅代表当日专注时长。
@@ -202,15 +198,21 @@ private fun heatColor(cell: AppViewModel.HeatCell): Color {
 }
 
 /**
- * 专注分钟数 → 水彩色阶（5 档）。
+ * 专注分钟数 → 主题色阶（5 档）。
  * 刻意**只依赖分钟数**，好让补录日历（[MonthCalendar]）复用同一套观感。
+ *
+ * 取色统一走 [ActivePalette.heatRamp]：纸底主题是半透明颜料叠色，深底主题是
+ * **不透明**色阶（深底直接用半透明色会读不出趋势，见该属性的说明）。
  */
-fun heatColorOf(minutes: Int): Color = when {
-    minutes <= 0 -> CardCream
-    minutes < 30 -> AccentGreen.copy(alpha = 0.35f)
-    minutes < 60 -> AccentGreen.copy(alpha = 0.55f)
-    minutes < 90 -> PrimaryLight.copy(alpha = 0.6f)
-    else -> Primary.copy(alpha = 0.75f)
+fun heatColorOf(minutes: Int): Color {
+    val idx = when {
+        minutes <= 0 -> 0
+        minutes < 30 -> 1
+        minutes < 60 -> 2
+        minutes < 90 -> 3
+        else -> 4
+    }
+    return ActivePalette.heatRamp.getOrElse(idx) { ActivePalette.cardCream }
 }
 
 /** source-over 叠加；要求 [bg] 已不透明，结果强制不透明 */

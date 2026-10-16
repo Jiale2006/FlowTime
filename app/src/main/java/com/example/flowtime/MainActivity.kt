@@ -224,7 +224,8 @@ fun FlowTimeApp(viewModel: AppViewModel = viewModel()) {
             popExitTransition = { ExitTransition.None },
         ) {
             composable(Routes.TIMER) {
-                TabPage(innerPadding) {
+                // 只有计时页需要中心禁区：圆环 + 大号时间数字压在纵向约 38% 处
+                TabPage(innerPadding, keepOutCenterYFraction = 0.38f) {
                 TimerScreen(
                     viewModel = viewModel,
                     onNavigateToTasks = {
@@ -315,11 +316,18 @@ fun FlowTimeApp(viewModel: AppViewModel = viewModel()) {
  * 关键点：页面自带**不透明底 + 自己的水彩晕染底**。页面是"整块不透明"的，
  * 切换那一帧新页才会完整盖住旧页；否则页面透明的地方会透出上一页内容，
  * 观感上就像"某个元素（比如计时圆圈）比别人先显示出来"。
+ *
+ * @param keepOutCenterYFraction 透传给背景的中心禁区纵向比例（null = 不挖禁区）；
+ *        只有计时页需要，见 [ThemeBackdrop] 的说明。
  */
 @Composable
-private fun TabPage(innerPadding: PaddingValues, content: @Composable () -> Unit) {
+private fun TabPage(
+    innerPadding: PaddingValues,
+    keepOutCenterYFraction: Float? = null,
+    content: @Composable () -> Unit,
+) {
     Box(Modifier.fillMaxSize().background(BgPrimary)) {
-        ThemeBackdrop(Modifier.matchParentSize())
+        ThemeBackdrop(Modifier.matchParentSize(), keepOutCenterYFraction)
         Box(Modifier.fillMaxSize().padding(innerPadding)) { content() }
     }
 }

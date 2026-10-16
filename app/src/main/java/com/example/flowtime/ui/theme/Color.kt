@@ -70,6 +70,29 @@ interface AppPalette {
     val rose: Color
     val sand: Color
 
+    // ---- 热力图色阶 ----
+    /**
+     * 热力图五档色阶（无记录 / <30 / <60 / <90 / ≥90 分钟）。
+     *
+     * 默认实现 = 纸底主题的「半透明颜料叠在卡片上」路线（越专注越深）。
+     *
+     * 🔴 **深底主题直接用半透明色会失效**：半透明的紫/蓝叠在已经压暗的深色玻璃卡上
+     *    抬不起亮度 —— 实测色阶跨度只有 渐变 0.080 / 粒子 0.074（`HeatContrastTest`
+     *    要求 > 0.2），而且**最深档反而比前一档更暗**（非单调，因为 Primary 本身比
+     *    PrimaryLight 暗）。所以深底主题必须 override 成**不透明**色阶。
+     *    （夜航同为深底，但它那套半透明香槟色叠在近黑底上跨度已达标 0.284，故不 override。）
+     *
+     * ⚠️ 允许返回半透明色（[MonthHeatmap] 的"范围外淡显"就靠 `alpha * 0.7`）。
+     */
+    val heatRamp: List<Color>
+        get() = listOf(
+            cardCream,
+            accentGreen.copy(alpha = 0.35f),
+            accentGreen.copy(alpha = 0.55f),
+            primaryLight.copy(alpha = 0.6f),
+            primary.copy(alpha = 0.75f),
+        )
+
     // ---- 形状 ----
     /** 大卡（ProCard、横幅、弹层内卡片） */
     val cardShape: Shape
@@ -487,6 +510,18 @@ object GradientPalette : AppPalette {
     override val rose = Color(0xFFF472B6)                 // pink-400
     override val sand = Color(0xFFC4B5FD)                 // violet-300
 
+    // 热力图色阶：本主题是**深底**，必须走不透明色阶 —— 半透明紫叠在深紫玻璃卡上抬不起
+    // 亮度，实测跨度只有 0.080（要求 > 0.2）且非单调（见 AppPalette.heatRamp 的说明）。
+    // violet-800 → 600 → 500 → 400 → 300：亮度 0.067→0.519 单调递增、跨度 0.452，
+    // 每档字色对比度最差 5.31:1（≥4.5）。
+    override val heatRamp = listOf(
+        Color(0xFF5B21B6),   // violet-800   无记录
+        Color(0xFF7C3AED),   // violet-600   < 30 分钟
+        Color(0xFFA855F7),   // violet-500   < 60 分钟
+        Color(0xFFC084FC),   // violet-400   < 90 分钟
+        Color(0xFFC4B5FD),   // violet-300   ≥ 90 分钟
+    )
+
     // 大圆角（规范 rounded-2xl / rounded-3xl）；禁直角
     override val cardShape = RoundedCornerShape(24.dp)     // rounded-3xl
     override val tileShape = RoundedCornerShape(16.dp)     // rounded-2xl
@@ -513,9 +548,8 @@ val ParticleTeal = Color(0xFF14B8A6)        // teal-500
 val ParticleCyan = Color(0xFF22D3EE)        // cyan-400（粒子高光）
 val ParticleViolet = Color(0xFF8B5CF6)      // violet-500
 
-/** 深蓝黑底（提示词 Background #0a0e1a / Surface #0f1419） */
+/** 深蓝黑底（提示词 Background #0a0e1a；Surface #0f1419 已内联进 surfaceCard/dialogContainer） */
 val ParticleNight = Color(0xFF0A0E1A)
-val ParticleSurface = Color(0xFF0F1419)
 val ParticleText = Color(0xFFE0E8FF)
 
 object ParticlePalette : AppPalette {
@@ -578,6 +612,17 @@ object ParticlePalette : AppPalette {
     override val teal = ParticleTeal
     override val rose = ParticleViolet
     override val sand = Color(0xFF7DD3FC)                  // sky-300
+
+    // 热力图色阶：同上是**深底**主题，必须走不透明色阶（半透明蓝叠深蓝玻璃卡，实测跨度
+    // 只有 0.074 且非单调）。blue-900 → blue-600 → sky-500 → sky-400 → teal-300（蓝→青），
+    // 亮度 0.051→0.660 单调递增、跨度 0.608，每档字色对比度最差 5.17:1。
+    override val heatRamp = listOf(
+        Color(0xFF1E3A8A),   // blue-900    无记录
+        Color(0xFF2563EB),   // blue-600    < 30 分钟
+        Color(0xFF0EA5E9),   // sky-500     < 60 分钟
+        Color(0xFF38BDF8),   // sky-400     < 90 分钟
+        Color(0xFF5EEAD4),   // teal-300    ≥ 90 分钟
+    )
 
     // rounded-xl（规范卡片）／按钮 rounded-lg；胶囊未被本风格禁止
     override val cardShape = RoundedCornerShape(12.dp)
