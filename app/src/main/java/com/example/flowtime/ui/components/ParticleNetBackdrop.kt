@@ -14,7 +14,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -205,37 +204,9 @@ fun ParticleNetBackdrop(
 
     Box(modifier.background(ParticleNight)) {
         Canvas(Modifier.fillMaxSize().onSizeChanged { state.viewport = it }) {
-            // 静态氛围光：左上冷蓝 / 右下青。不参与帧循环（动态交给粒子本身），
-            // 只是让深蓝黑底不至于死平。终止色用"同色 alpha=0"而非 Transparent —— 后者会泛灰边。
-            val radiusA = size.minDimension * 0.78f
-            val centerA = Offset(size.width * 0.14f, size.height * 0.10f)
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        ParticleBlue.copy(alpha = 0.15f),
-                        ParticleBlue.copy(alpha = 0f),
-                    ),
-                    center = centerA,
-                    radius = radiusA,
-                ),
-                radius = radiusA,
-                center = centerA,
-            )
-            val radiusB = size.minDimension * 0.70f
-            val centerB = Offset(size.width * 0.92f, size.height * 0.88f)
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        ParticleTeal.copy(alpha = 0.11f),
-                        ParticleTeal.copy(alpha = 0f),
-                    ),
-                    center = centerB,
-                    radius = radiusB,
-                ),
-                radius = radiusB,
-                center = centerB,
-            )
-
+            // ⚠️ 底色**刻意保持纯平**，不要再加氛围光斑。
+            // 这里原有两团大面积柔光（左上冷蓝 / 右下青，覆盖大半屏），用户看过说像"一层蓝色幕布
+            // 压在数据上"，要求全页面去掉 —— 觉得底太平的话宁可调粒子亮度，也别把光斑加回来。
             state.frameTick // 订阅帧刷新
 
             val dots = state.dots
