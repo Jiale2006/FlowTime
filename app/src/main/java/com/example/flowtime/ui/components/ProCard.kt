@@ -9,7 +9,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -19,7 +18,6 @@ import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.BorderColor
 import com.example.flowtime.ui.theme.GlassBottomShade
 import com.example.flowtime.ui.theme.GlassInnerLight
-import com.example.flowtime.ui.theme.ParticleBlue
 import com.example.flowtime.ui.theme.SurfaceCard
 import com.example.flowtime.ui.theme.ThemeMode
 
@@ -53,8 +51,8 @@ fun Modifier.softShadow(
  *   无 blur 阴影、无渐变、小圆角；
  * - 现代渐变：白 10% 玻璃卡 + 白 20% 细边 + 顶边受光高光，大圆角
  *   （**不用 elevation 阴影**：阴影会从半透明卡内侧透出、在卡内形成暗带，详见下方分支注释）；
- * - 粒子系统：深色玻璃卡（#0f1419 @70%）+ 白 10% 细边 + 顶边受光高光 + 冷蓝星云外辉光
- *   （同样**不用 elevation 阴影**，外发光走手绘径向渐变，见下方分支注释）。
+ * - 粒子系统：深色玻璃卡（#0f1419 @70%）+ 白 10% 细边 + 顶边受光高光，**无卡片级辉光**
+ *   （曾有一圈冷蓝外发光，叠加成整屏蓝雾，已按用户要求删除，见下方分支注释）。
  */
 @Composable
 fun ProCard(
@@ -138,34 +136,16 @@ fun ProCard(
             }
         }
         ThemeMode.PARTICLES -> {
-            // 粒子系统：深空玻璃卡 —— #0f1419 @70% 底 + 白 10% 细边 + 顶边受光高光，
-            // 外缘一圈冷蓝"星云"辉光（提示词 Nebula Glow：低不透明度、大范围扩散）。
-            // 🔴 外发光走**手绘径向渐变**，不用 Modifier.shadow —— Android 的高度阴影是一整块
-            //    模糊剪影、且会被 clipToOutline 裁进轮廓**内侧**，半透明卡挡不住它，卡内会出现
-            //    "外亮内暗"的暗带（现代渐变已实测踩过，见下面 GRADIENT 分支的完整记录）。
-            //    这里把光晕画在 `clip` **左侧**（Modifier 链上在裁剪之外），所以它不被卡片轮廓裁掉；
-            //    卡内也会透出一点冷蓝 —— 正是"玻璃借身后光"的效果，而不是一块死板的实色。
-            Box(
-                modifier = modifier
-                    .drawBehind {
-                        val c = Offset(size.width / 2f, size.height * 0.32f)
-                        val r = size.maxDimension * 0.92f
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                colors = listOf(
-                                    ParticleBlue.copy(alpha = 0.18f),
-                                    // 终止色用"同色 alpha=0"，别用 Color.Transparent（会泛灰边）
-                                    ParticleBlue.copy(alpha = 0f),
-                                ),
-                                center = c,
-                                radius = r,
-                            ),
-                            radius = r,
-                            center = c,
-                        )
-                    }
-                    .clip(shape),
-            ) {
+            // 粒子系统：深空玻璃卡 —— #0f1419 @70% 底 + 白 10% 细边 + 顶边受光高光。
+            // 🔴 刻意**不加任何卡片级辉光**。原来这里有一圈冷蓝"星云"外发光（提示词 Nebula Glow）：
+            //    半径 = 卡片最长边 × 0.92、且画在 `clip` 左侧所以会溢到卡外。统计页卡片一多，
+            //    每张光晕半径接近整张卡宽、彼此叠加 → 整屏泛蓝雾。用户实测反馈"像一层蓝色幕布
+            //    压在数据上"、"过了几帧又有了"（卡片是 Room 数据加载后才渲染的，光晕随之出现）。
+            //    实测：屏最左边缘（那里没有卡片）蓝色 27.5 → 59.5（×2.2）；全屏蓝色富余度
+            //    13.9 → 33.4。"星云感"改由背景的粒子网承担 —— 卡片只做玻璃材质，不再自己发光。
+            //    （同样不走 Modifier.shadow：高度阴影会被 clipToOutline 裁进轮廓内侧，
+            //      半透明卡上会出现卡内暗带，GRADIENT 分支有完整实测记录。）
+            Box(modifier.clip(shape)) {
                 // 第 1 层：深色玻璃底（#0f1419 @70%；弹窗传入更实的容器色）
                 Box(Modifier.matchParentSize().background(color))
                 // 第 2 层：顶边受光高光（白 8% → 全透明，光从上方来）
