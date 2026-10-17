@@ -40,7 +40,6 @@ fun FlowTimeTheme(
         ThemeMode.DOODLE -> doodleScheme(palette)
         ThemeMode.WATERCOLOR -> watercolorScheme(palette)
         ThemeMode.MONO -> monoScheme(palette)
-        ThemeMode.GRADIENT -> gradientScheme(palette)
         ThemeMode.PARTICLES -> particleScheme(palette)
     }
     SceneSystemBarsEffect(palette)
@@ -137,33 +136,6 @@ private fun monoScheme(p: AppPalette) = lightColorScheme(
     onSurface = p.textPrimary,
     surfaceVariant = p.cardCream,
     onSurfaceVariant = p.textSecondary,
-    outline = p.dividerColor,
-    outlineVariant = p.borderColor,
-    error = p.errorRed,
-)
-
-/** 现代渐变（深紫底，基于 darkColorScheme；白字 + 紫/品红/青渐变强调）*/
-private fun gradientScheme(p: AppPalette) = darkColorScheme(
-    primary = p.primary,
-    onPrimary = Color.White,
-    primaryContainer = p.cardGreenLight,
-    onPrimaryContainer = p.textPrimary,
-    secondary = p.accentGreen,
-    onSecondary = Color(0xFF04212B),
-    secondaryContainer = Color(0x3306B6D4),
-    onSecondaryContainer = Color(0xFFCFFAFE),
-    tertiary = p.gold,
-    onTertiary = GradNightDeep,
-    background = p.bgPrimary,
-    onBackground = p.textPrimary,
-    surface = p.surfaceCard,
-    onSurface = p.textPrimary,
-    surfaceVariant = p.cardCream,
-    onSurfaceVariant = p.textSecondary,
-    surfaceContainerLow = Color(0xFF181437),
-    surfaceContainer = Color(0xFF1E1B4B),
-    surfaceContainerHigh = Color(0xFF2A2159),
-    surfaceContainerHighest = Color(0xFF342A6B),
     outline = p.dividerColor,
     outlineVariant = p.borderColor,
     error = p.errorRed,
@@ -325,50 +297,6 @@ private fun typographyFor(mode: ThemeMode): Typography = when (mode) {
             fontSize = 12.sp, lineHeight = 16.sp, letterSpacing = 1.sp,
         ),
     )
-    // 现代渐变：全无衬线；标题 Bold（规范 TYPOGRAPHY「Headings: font-bold」），
-    // 正文 Normal、小标签 Medium（font-medium~semibold）—— 现代科技感，不用衬线。
-    ThemeMode.GRADIENT -> Typography(
-        headlineLarge = TextStyle(
-            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold,
-            fontSize = 28.sp, lineHeight = 34.sp, letterSpacing = (-0.25).sp,
-        ),
-        headlineMedium = TextStyle(
-            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold,
-            fontSize = 24.sp, lineHeight = 30.sp, letterSpacing = (-0.25).sp,
-        ),
-        headlineSmall = TextStyle(
-            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold,
-            fontSize = 20.sp, lineHeight = 26.sp,
-        ),
-        titleLarge = TextStyle(
-            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Bold,
-            fontSize = 20.sp, lineHeight = 26.sp,
-        ),
-        titleMedium = TextStyle(
-            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.SemiBold,
-            fontSize = 16.sp, lineHeight = 22.sp,
-        ),
-        bodyLarge = TextStyle(
-            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal,
-            fontSize = 16.sp, lineHeight = 26.sp,
-        ),
-        bodyMedium = TextStyle(
-            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal,
-            fontSize = 14.sp, lineHeight = 22.sp,
-        ),
-        bodySmall = TextStyle(
-            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal,
-            fontSize = 12.sp, lineHeight = 18.sp,
-        ),
-        labelLarge = TextStyle(
-            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Medium,
-            fontSize = 14.sp, lineHeight = 20.sp,
-        ),
-        labelMedium = TextStyle(
-            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal,
-            fontSize = 12.sp, lineHeight = 18.sp,
-        ),
-    )
     // 粒子系统：全站无衬线（提示词 font-sans font-semibold 标题 / text-sm 正文），
     // 科技感靠字重与字距，不靠衬线
     ThemeMode.PARTICLES -> Typography(
@@ -411,7 +339,7 @@ private fun typographyFor(mode: ThemeMode): Typography = when (mode) {
 /**
  * M3 组件圆角随主题整体缩放：
  * 水彩放大（输入框 extraSmall=16dp ≈ rounded-2xl）；涂鸦收小；
- * 现代渐变放大到 rounded-2xl / rounded-3xl 区间（规范禁直角 rounded-none）。
+ * 粒子系统收在 rounded-xl 一档。
  */
 private fun shapesFor(mode: ThemeMode): Shapes = when (mode) {
     ThemeMode.WATERCOLOR -> Shapes(
@@ -427,13 +355,6 @@ private fun shapesFor(mode: ThemeMode): Shapes = when (mode) {
         medium = RoundedCornerShape(6.dp),
         large = RoundedCornerShape(6.dp),
         extraLarge = RoundedCornerShape(8.dp),
-    )
-    ThemeMode.GRADIENT -> Shapes(
-        extraSmall = RoundedCornerShape(10.dp),
-        small = RoundedCornerShape(16.dp),
-        medium = RoundedCornerShape(20.dp),
-        large = RoundedCornerShape(24.dp),      // rounded-3xl
-        extraLarge = RoundedCornerShape(28.dp),
     )
     // 粒子系统：rounded-xl 卡片 / rounded-lg 按钮（提示词 Token 字典）
     ThemeMode.PARTICLES -> Shapes(
@@ -456,9 +377,8 @@ private fun SceneSystemBarsEffect(palette: AppPalette) {
     SideEffect {
         val activity = view.context as? ComponentActivity ?: return@SideEffect
         val window = activity.window
-        // 深色主题（夜航 / 现代渐变 / 粒子系统）→ 浅色系统图标；窗口底色取各自的主题底，冷启动不闪错色
-        if (palette.mode == ThemeMode.NOCTURNE || palette.mode == ThemeMode.GRADIENT ||
-            palette.mode == ThemeMode.PARTICLES
+        // 深色主题（夜航 / 粒子系统）→ 浅色系统图标；窗口底色取各自的主题底，冷启动不闪错色
+        if (palette.mode == ThemeMode.NOCTURNE || palette.mode == ThemeMode.PARTICLES
         ) {
             window.setBackgroundDrawable(ColorDrawable(palette.bgPrimary.toArgb()))
             activity.enableEdgeToEdge(

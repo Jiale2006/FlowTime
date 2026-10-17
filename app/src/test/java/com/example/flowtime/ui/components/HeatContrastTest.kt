@@ -74,8 +74,8 @@ class HeatContrastTest {
             ActivePalette = palette
             val inkLum = inkOn(heatColorOf(0)).luminance()
             // 判据不写死主题名单，而是按**页面底色本身的明暗**分派。
-            // 原来那条断言的前提是"夜航是唯一深底主题"—— 深底主题涨到 3 个
-            //（夜航 / 现代渐变 / 粒子系统）之后，白名单式写法必然误报：
+            // 原来那条断言的前提是"夜航是唯一深底主题"—— 深底主题涨到 2 个
+            //（夜航 / 粒子系统）之后，白名单式写法必然误报：
             // 深底上无记录格**注定**用白字，而白字恰恰是对的。
             if (palette.bgPrimary.luminance() < 0.5f) {
                 assertTrue(

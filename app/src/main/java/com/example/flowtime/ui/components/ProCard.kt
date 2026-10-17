@@ -49,8 +49,6 @@ fun Modifier.softShadow(
  *   （顶边受光高光、底边背光暗缘、外层近黑深阴影）；
  * - 手绘涂鸦：奶白纸面 + 墨黑虚线描边 + 蓝绿标记笔硬偏移阴影 + 黄胶带，
  *   无 blur 阴影、无渐变、小圆角；
- * - 现代渐变：白 10% 玻璃卡 + 白 20% 细边 + 顶边受光高光，大圆角
- *   （**不用 elevation 阴影**：阴影会从半透明卡内侧透出、在卡内形成暗带，详见下方分支注释）；
  * - 粒子系统：深色玻璃卡（#0f1419 @70%）+ 白 10% 细边 + 顶边受光高光，**无卡片级辉光**
  *   （曾有一圈冷蓝外发光，叠加成整屏蓝雾，已按用户要求删除，见下方分支注释）。
  */
@@ -102,39 +100,6 @@ fun ProCard(
                 Box { content() }
             }
         }
-        ThemeMode.GRADIENT -> {
-            // 现代渐变：白 10% 玻璃卡 + 白 20% 细边 + 顶边受光高光 + 紫彩色光晕阴影。
-            // Android 端没有逐卡实时模糊，但页面底是"有色的光球场景"——半透明卡正好
-            // 借到身后那团渐变色，观感就是"渐变玻璃"（对着纯色底才是死板色块）。
-            // 与夜航玻璃的区别：夜航内容卡刻意用近实心钢蓝保可读；本主题卡片透，
-            // 因为底是深紫、白 10% 叠上去仍是深色，白字对比度 >10:1，可读性有余量。
-            // 🔴 本主题刻意**不加 Modifier.shadow（elevation 高度阴影）**：
-            //    Android 的高度阴影是一整块「模糊剪影」，且会被 clipToOutline 裁进轮廓**内侧**——
-            //    半透明卡（白 10%）挡不住它，于是卡内出现一圈「外亮内暗」的暗带
-            //    （实测：卡内暗约 7%，暗带自边缘向内约 20dp，正好等于 elevation 的量级），
-            //    而卡外本该有的光晕反被裁掉、一点都看不见 —— 即该阴影在此只有害无益。
-            //    "发光"感改由下面的受光高光 + 白描边承担，不走 elevation。
-            Box(modifier.clip(shape)) {
-                // 第 1 层：白玻璃底（白 10%；弹窗传入更实的容器色）
-                Box(Modifier.matchParentSize().background(color))
-                // 第 2 层：顶边受光高光（白 12% → 全透明，光从上方来）
-                Box(
-                    Modifier.matchParentSize().background(
-                        Brush.verticalGradient(
-                            colors = listOf(Color(0x1FFFFFFF), Color(0x00FFFFFF)),
-                        ),
-                    ),
-                )
-                // 第 3 层：1dp 白 20% 边框（规范 border-white/20）
-                Surface(
-                    modifier = Modifier.matchParentSize(),
-                    shape = shape,
-                    color = Color.Transparent,
-                    border = BorderStroke(1.dp, BorderColor),
-                ) {}
-                Box { content() }
-            }
-        }
         ThemeMode.PARTICLES -> {
             // 粒子系统：深空玻璃卡 —— #0f1419 @70% 底 + 白 10% 细边 + 顶边受光高光。
             // 🔴 刻意**不加任何卡片级辉光**。原来这里有一圈冷蓝"星云"外发光（提示词 Nebula Glow）：
@@ -144,7 +109,7 @@ fun ProCard(
             //    实测：屏最左边缘（那里没有卡片）蓝色 27.5 → 59.5（×2.2）；全屏蓝色富余度
             //    13.9 → 33.4。"星云感"改由背景的粒子网承担 —— 卡片只做玻璃材质，不再自己发光。
             //    （同样不走 Modifier.shadow：高度阴影会被 clipToOutline 裁进轮廓内侧，
-            //      半透明卡上会出现卡内暗带，GRADIENT 分支有完整实测记录。）
+            //      半透明卡上会出现卡内暗带，现代渐变主题曾实测坐实。）
             Box(modifier.clip(shape)) {
                 // 第 1 层：深色玻璃底（#0f1419 @70%；弹窗传入更实的容器色）
                 Box(Modifier.matchParentSize().background(color))
