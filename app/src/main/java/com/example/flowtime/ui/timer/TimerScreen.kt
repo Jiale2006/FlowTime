@@ -1,7 +1,11 @@
 package com.example.flowtime.ui.timer
 
+import android.os.Build
+import android.view.HapticFeedbackConstants
+import android.view.View
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,7 +20,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -64,11 +67,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -123,8 +125,6 @@ private fun BoxScope.TimerRingSection(
     reducedMotion: Boolean,
     frozenPaintingP: MutableFloatState,
     controlPressed: Boolean,
-    onControlPressChange: (Boolean) -> Unit,
-    onTogglePause: () -> Unit,
 ) {
     val timer = timerState.value
     val displayMillis = when {
@@ -209,30 +209,6 @@ private fun BoxScope.TimerRingSection(
             glassHighlighted = controlPressed,
         )
     }
-    if (!isIdle) {
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .offset(y = 28.dp)
-                .size(88.dp)
-                .clip(CircleShape)
-                // 实心主色 + 白字（夜航香槟底配深墨字，白字压亮金对比只有 2.3:1）
-                .background(SolidColor(Primary))
-                .pressScale(onPressChange = onControlPressChange)
-                .clickable(onClick = onTogglePause),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = if (timer.phase == AppViewModel.TimerPhase.RUNNING) "暂停" else "继续",
-                color = when (ActivePalette.mode) {
-                    ThemeMode.NOCTURNE -> OnChampagne
-                    else -> Color.White
-                },
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-            )
-        }
-    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -288,8 +264,6 @@ fun TimerScreen(
     var showPomodoroSheet by remember { mutableStateOf(false) }
     // 玻璃拟态的受光响应用：主按钮是否被按住（低频 boolean，不破坏上面的 10Hz 隔离）
     var controlPressed by remember { mutableStateOf(false) }
-    // 触感：Apple 的计时器按钮是"视觉 + 触感"双反馈，只有视觉会显得空
-    val haptics = LocalHapticFeedback.current
 
     LaunchedEffect(completed) {
         if (completed != null) onCompleted()
@@ -470,12 +444,6 @@ fun TimerScreen(
                     reducedMotion = reducedMotion,
                     frozenPaintingP = frozenPaintingP,
                     controlPressed = controlPressed,
-                    onControlPressChange = { controlPressed = it },
-                    onTogglePause = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        if (phase == AppViewModel.TimerPhase.RUNNING) viewModel.pauseFocus()
-                        else viewModel.resumeFocus()
-                    },
                 )
             }
 
@@ -489,7 +457,7 @@ fun TimerScreen(
                 ) {
                     Button(
                         onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            localView.hapticConfirm()
                             viewModel.startFocus()
                         },
                         modifier = Modifier
@@ -537,37 +505,40 @@ fun TimerScreen(
                     }
                 }
             } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedButton(
-                        onClick = { showCancelConfirm = true },
-                        modifier = Modifier.weight(1f).height(Dimens.ButtonHeight).pressScale(),
-                        shape = ActivePalette.buttonShape,
-                        border = BorderStroke(1.dp, ErrorRed),
-                    ) {
-                        Text("取消", color = ErrorRed, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    }
-                    Button(
+                // iOS 计时器式的操作区：两个**等大圆形**（暂停 / 结束）居中横排。
+                // 原来"环底一颗悬浮暂停圆 + 底部横排两个宽按钮"是两套层级，Apple 不会这么排；
+                // 取消降级为下方小字 —— 丢弃本轮是低频且具破坏性，不该和主操作抢视觉。
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(40.dp, Alignment.CenterHorizontally),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TimerRoundButton(
+                        label = if (phase == AppViewModel.TimerPhase.RUNNING) "暂停" else "继续",
+                        primary = true,
+                        onPressedChange = { controlPressed = it },
                         onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            localView.hapticTick()
+                            if (phase == AppViewModel.TimerPhase.RUNNING) viewModel.pauseFocus()
+                            else viewModel.resumeFocus()
+                        },
+                    )
+                    TimerRoundButton(
+                        label = when (mode) {
+                            AppViewModel.TimerMode.COUNT_UP -> "完成"
+                            AppViewModel.TimerMode.POMODORO -> "结束本轮"
+                            AppViewModel.TimerMode.COUNT_DOWN -> "结束\n并记录"
+                        },
+                        primary = false,
+                        onPressedChange = { controlPressed = it },
+                        onClick = {
+                            localView.hapticConfirm()
                             viewModel.finishEarly()
                         },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(Dimens.ButtonHeight)
-                            .pressScale(onPressChange = { controlPressed = it }),
-                        shape = ActivePalette.buttonShape,
-                        colors = ButtonDefaults.buttonColors(containerColor = Primary),
-                    ) {
-                        Text(
-                            text = when (mode) {
-                                AppViewModel.TimerMode.COUNT_UP -> "完成"
-                                AppViewModel.TimerMode.POMODORO -> "结束本轮"
-                                AppViewModel.TimerMode.COUNT_DOWN -> "结束并记录"
-                            },
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Light,
-                        )
-                    }
+                    )
+                }
+                TextButton(onClick = { showCancelConfirm = true }) {
+                    Text("取消本轮", color = ErrorRed, fontSize = 13.sp)
                 }
             }
             Spacer(Modifier.height(Dimens.ListBottomGap))
@@ -942,6 +913,67 @@ private fun durationPreviewText(minutes: Int): String {
     return "现在 %02d:%02d → %s 结束（%s）".format(
         start.hour, start.minute, endText, durationLabel(minutes),
     )
+}
+
+/**
+ * 触感分级（Apple 的按钮都有触感，而且轻重有别）：
+ * - 轻（暂停 / 继续）= `CLOCK_TICK`，像秒表按键的"嗒"一声
+ * - 重（开始 / 结束）= `CONFIRM`（API 30+；低版本退化为 `LONG_PRESS`）
+ */
+private fun View.hapticTick() {
+    performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+}
+
+private fun View.hapticConfirm() {
+    performHapticFeedback(
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            HapticFeedbackConstants.CONFIRM
+        } else {
+            HapticFeedbackConstants.LONG_PRESS
+        },
+    )
+}
+
+/** 计时页主操作圆形按钮的直径（iOS 计时器运行态的按钮量级） */
+private val ControlCircleSize = 76.dp
+
+/**
+ * 计时页主操作按钮（iOS 计时器式）：等大圆形。
+ * 主操作填充主色，次操作用玻璃卡底 —— 两者尺寸/间距一致，靠材质区分层级而不是靠大小。
+ */
+@Composable
+private fun TimerRoundButton(
+    label: String,
+    primary: Boolean,
+    onPressedChange: (Boolean) -> Unit,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(ControlCircleSize)
+            .clip(CircleShape)
+            .background(
+                if (primary) SolidColor(Primary) else SolidColor(ActivePalette.surfaceCard),
+            )
+            .border(1.dp, ActivePalette.borderColor, CircleShape)
+            .pressScale(onPressChange = onPressedChange)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = label,
+            color = when {
+                !primary -> TextPrimary
+                // 夜航香槟底配深墨字：白字压亮金对比只有 2.3:1
+                ActivePalette.mode == ThemeMode.NOCTURNE -> OnChampagne
+                else -> Color.White
+            },
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
+            lineHeight = 18.sp,
+        )
+    }
 }
 
 private fun formatClock(millis: Long): String {
