@@ -56,13 +56,7 @@ import androidx.compose.ui.unit.sp
 import com.example.flowtime.ui.theme.AccentGreen
 import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.CardGreenLight
-import com.example.flowtime.ui.theme.Champagne
 import com.example.flowtime.ui.theme.ChampagneBright
-import com.example.flowtime.ui.theme.GlassBorder
-import com.example.flowtime.ui.theme.GlassBorderHigh
-import com.example.flowtime.ui.theme.GlassBottomShade
-import com.example.flowtime.ui.theme.GlassFillHigh
-import com.example.flowtime.ui.theme.Moonlight
 import com.example.flowtime.ui.theme.MonoGray200
 import com.example.flowtime.ui.theme.MonoInk
 import com.example.flowtime.ui.theme.ParticleBlue
@@ -86,6 +80,13 @@ private val MonoLineWidth = 2.dp
  * 不是其余主题 14dp 的"管"），同样与 strokeWidth 形参无关，单独定义。
  */
 private val ParticleLineWidth = 3.dp
+
+/**
+ * 玻璃拟态的环线宽（2026-10-17 按"完全苹果"改）：Apple 计时器的环是**一条等宽细线**，
+ * 不是 14dp 的管。直径约 280dp 的环上 Apple 的比例接近 3%，取 8dp。
+ * 与 [MonoLineWidth]/[ParticleLineWidth] 一样，不跟随 strokeWidth 形参。
+ */
+private val NocturneLineWidth = 8.dp
 
 /**
  * 环形倒计时（教程 §3.1）：底色弧 + 渐变进度弧，圆角线帽，弧首定位点，中央大号时间。
@@ -129,6 +130,8 @@ fun RingTimer(
     val monoLinePx = with(LocalDensity.current) { MonoLineWidth.toPx() }
     // 粒子系统专属：3dp 细环 + 外缘辉光的像素宽
     val particleLinePx = with(LocalDensity.current) { ParticleLineWidth.toPx() }
+    // 玻璃拟态：Apple 式单笔环的线宽
+    val nocturneLinePx = with(LocalDensity.current) { NocturneLineWidth.toPx() }
     val clamped = progress.coerceIn(0f, 1f)
 
     // ---- 主题动效参数：水彩=液态缓动（≥500ms ease-in-out，禁快速缓动）----
@@ -210,38 +213,15 @@ fun RingTimer(
             val center = Offset(size.width / 2, size.height / 2)
             val doodle = mode == ThemeMode.DOODLE
 
-            // 底色弧。玻璃拟态 = 无色空玻璃管：白 8% 管体 + 内外管壁细边 + 顶缘受光高光
+            // 底色弧。玻璃拟态 = **Apple 式底轨**：一整圈等宽细线（白 10%、圆头）。
+            // 🔴 原来那套玻璃管（白 8% 管体 + 内外管壁 + 顶缘受光）已按"完全苹果"删除 ——
+            //    Apple 的环只有两笔：一条轨道 + 一条进度，靠**宽度和明度**分层，不靠拟物光感。
             if (mode == ThemeMode.NOCTURNE) {
                 drawArc(
-                    color = GlassFillHigh.copy(alpha = 0.5f * ringA),
+                    color = Color.White.copy(alpha = 0.10f * ringA),
                     startAngle = 0f, sweepAngle = 360f, useCenter = false,
                     topLeft = topLeft, size = arcSize,
-                    style = Stroke(width = strokePx, cap = StrokeCap.Round),
-                )
-                // 管壁（内外两条白 15% 细边 = 玻璃厚度）
-                fun wallArc(insetAdj: Float, alpha: Float) {
-                    val ins = inset + insetAdj
-                    drawArc(
-                        color = GlassBorder.copy(alpha = alpha * ringA),
-                        startAngle = 0f, sweepAngle = 360f, useCenter = false,
-                        topLeft = Offset(ins, ins),
-                        size = Size(size.width - ins * 2, size.height - ins * 2),
-                        style = Stroke(width = strokePx * 0.07f),
-                    )
-                }
-                wallArc(-strokePx * 0.5f, 1f)
-                wallArc(strokePx * 0.5f, 0.7f)
-                // 顶缘受光：上半环外壁一条渐弱白高光（光从上方来）。
-                // 按住主按钮时抬到 0.70（0.55 + 0.15）—— 玻璃对交互有受光响应，但不自发循环
-                drawArc(
-                    color = GlassBorderHigh.copy(alpha = (0.55f + 0.15f * highlightBoost) * ringA),
-                    startAngle = -150f, sweepAngle = 120f, useCenter = false,
-                    topLeft = Offset(inset - strokePx * 0.5f, inset - strokePx * 0.5f),
-                    size = Size(
-                        size.width - (inset - strokePx * 0.5f) * 2,
-                        size.height - (inset - strokePx * 0.5f) * 2,
-                    ),
-                    style = Stroke(width = strokePx * 0.14f, cap = StrokeCap.Round),
+                    style = Stroke(width = nocturneLinePx, cap = StrokeCap.Round),
                 )
             } else if (mode == ThemeMode.PARTICLES) {
                 // 粒子系统（2B）：底轨 = 一根极淡冷蓝细线，整圈、圆头。
@@ -363,51 +343,21 @@ fun RingTimer(
                         )
                     }
 
-                    // 玻璃拟态：管内液体光（月光蓝，越紧迫越香槟）+ 管壁镜面细线 +
-                    // 白色扫光沿环缘缓行（玻璃只借光不上色：扫光不用香槟）
+                    // 玻璃拟态（Apple 式单笔环）：一条等宽弧、圆头收口，
+                    // 颜色随剩余时间从月光蓝走到香槟（主题色保留），越紧迫越亮。
+                    // 🔴 液体扫光渐变 / 管壁镜面线 / 背光暗缘 三件已删 —— 那是拟物玻璃的加法，
+                    //    Apple 的环只做减法：一笔弧 + 一条底轨就是全部。
+                    //    按住主按钮时整条弧微微一档变亮（Apple 的控件按下也是这个反应，不是自发循环）。
                     ThemeMode.NOCTURNE -> {
-                        val liquidBrush = Brush.sweepGradient(
-                            colors = listOf(
-                                pigmentBase.copy(alpha = 0.40f),
-                                pigmentBase.copy(alpha = 0.92f),
-                                lerp(pigmentBase, Moonlight, 0.5f).copy(alpha = 0.70f),
-                            ),
-                            center = center,
-                        )
                         drawArc(
-                            brush = liquidBrush,
+                            color = pigmentBase,
                             startAngle = -90f,
                             sweepAngle = sweep,
                             useCenter = false,
                             topLeft = topLeft,
                             size = arcSize,
-                            alpha = ringA,
-                            style = Stroke(width = strokePx * 0.78f, cap = StrokeCap.Round),
-                        )
-                        // 管壁镜面细线：贴着液体偏外缘的一道白（管截面的受光反射）
-                        val specIns = inset - strokePx * 0.16f
-                        drawArc(
-                            color = Color.White,
-                            startAngle = -90f,
-                            sweepAngle = sweep,
-                            useCenter = false,
-                            topLeft = Offset(specIns, specIns),
-                            size = Size(size.width - specIns * 2, size.height - specIns * 2),
-                            alpha = 0.22f * ringA,
-                            style = Stroke(width = strokePx * 0.10f, cap = StrokeCap.Round),
-                        )
-                        // 背光暗缘：液体下缘一线近黑（inset bottom shade 的弧形版）。
-                        // alpha 收得很低：叠在香槟液体上会发棕褐"泥圈"，月光态点到为止
-                        val shadeIns = inset + strokePx * 0.24f
-                        drawArc(
-                            color = GlassBottomShade,
-                            startAngle = -90f,
-                            sweepAngle = sweep,
-                            useCenter = false,
-                            topLeft = Offset(shadeIns, shadeIns),
-                            size = Size(size.width - shadeIns * 2, size.height - shadeIns * 2),
-                            alpha = 0.22f * ringA,
-                            style = Stroke(width = strokePx * 0.12f, cap = StrokeCap.Round),
+                            alpha = (0.88f + 0.12f * highlightBoost) * ringA,
+                            style = Stroke(width = nocturneLinePx, cap = StrokeCap.Round),
                         )
                     }
 
@@ -499,22 +449,9 @@ fun RingTimer(
                     center.x + (radius * cos(headAngle)).toFloat(),
                     center.y + (radius * sin(headAngle)).toFloat(),
                 )
-                if (mode == ThemeMode.NOCTURNE) {
-                    // 液面前缘 = 香槟金游标（全环唯一香槟金定点）：一圈细环 + 亮核，静态不动。
-                    drawCircle(
-                        color = Champagne.copy(alpha = 0.9f * ringA),
-                        radius = strokePx * 0.46f,
-                        center = headCenter,
-                        style = Stroke(strokePx * 0.12f),
-                    )
-                    drawCircle(
-                        color = ChampagneBright.copy(alpha = 0.95f * ringA),
-                        radius = strokePx * 0.26f,
-                        center = headCenter,
-                    )
-                } else if (mode != ThemeMode.MONO && mode != ThemeMode.PARTICLES) {
-                    // 弧首圆点。单色极简被上面的条件排除：用户要"就是一根线"，不留端点；
-                    // 粒子系统同理（2B 方案只要冷蓝细环 + 外缘辉光，不要能量核）
+                if (mode != ThemeMode.NOCTURNE && mode != ThemeMode.MONO && mode != ThemeMode.PARTICLES) {
+                    // 弧首圆点。玻璃拟态不留端点（Apple 的环靠**圆头笔画**收口，不另加游标点）；
+                    // 单色极简是"就是一根线"；粒子系统同理（2B 只要冷蓝细环，不要能量核）
                     drawCircle(
                         color = pigmentBase.copy(alpha = 0.75f * ringA),
                         radius = strokePx * 0.52f,
