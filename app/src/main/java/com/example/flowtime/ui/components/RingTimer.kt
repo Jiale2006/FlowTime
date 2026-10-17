@@ -36,6 +36,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
@@ -158,7 +161,18 @@ fun RingTimer(
     }
     val pigmentLight = lerp(pigmentBase, PrimaryLight, 0.45f)
 
-    Box(modifier = modifier.aspectRatio(1f), contentAlignment = Alignment.Center) {
+    Box(
+        modifier = modifier
+            .aspectRatio(1f)
+            // 🔴 无障碍：环是纯 Canvas，本身**没有任何语义** —— 读屏用户原来只听到中间的数字，
+            //    听不出"进行到哪了"。这里把整块标成一个进度条节点（mergeDescendants 让中央文案
+            //    并进同一个节点：TalkBack 一次读「75%，剩余 12:34」）。
+            //    值用 clamped（1 = 满环），倒计时语义即"还剩多少"。
+            .semantics(mergeDescendants = true) {
+                progressBarRangeInfo = ProgressBarRangeInfo(clamped, 0f..1f)
+            },
+        contentAlignment = Alignment.Center,
+    ) {
         // 环区为纯静态绘制（用户要求简洁：光带 / 粒子 / 涟漪 / 流光 / 笔尖特效全部移除）：
         // 只留 底色弧 + 进度弧 + 弧首定位点 + 中央时间。
         // 不再用 graphicsLayer 承载整体透明度：整块图层在页面切换时容易留下残影。
