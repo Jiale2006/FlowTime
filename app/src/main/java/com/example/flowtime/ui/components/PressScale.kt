@@ -25,8 +25,10 @@ import com.example.flowtime.ui.theme.ThemeMode
  * - 水彩：沿用规范里的「液态慢收」400ms —— 风格提示词明文禁止快速缓动，别动。
  * - 其余主题：120ms 强 ease-out。按压反馈必须跟手：400ms 的 FastOutSlowIn 前 100ms
  *   只走 17%，scale 才变 0.34%，肉眼等同"按了没反应"。
+ *
+ * @param onPressChange 按下/抬起回调 —— 玻璃拟态拿它驱动环形高光的受光响应（Liquid Glass 的交互受光）
  */
-fun Modifier.pressScale(): Modifier = composed {
+fun Modifier.pressScale(onPressChange: (Boolean) -> Unit = {}): Modifier = composed {
     val slowLiquid = ActivePalette.mode == ThemeMode.WATERCOLOR
     var pressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
@@ -44,8 +46,10 @@ fun Modifier.pressScale(): Modifier = composed {
             awaitEachGesture {
                 awaitFirstDown(requireUnconsumed = false)
                 pressed = true
+                onPressChange(true)
                 waitForUpOrCancellation()
                 pressed = false
+                onPressChange(false)
             }
         }
 }

@@ -64,7 +64,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -120,6 +122,8 @@ private fun BoxScope.TimerRingSection(
     isIdle: Boolean,
     reducedMotion: Boolean,
     frozenPaintingP: MutableFloatState,
+    controlPressed: Boolean,
+    onControlPressChange: (Boolean) -> Unit,
     onTogglePause: () -> Unit,
 ) {
     val timer = timerState.value
@@ -202,6 +206,7 @@ private fun BoxScope.TimerRingSection(
             } else {
                 null
             },
+            glassHighlighted = controlPressed,
         )
     }
     if (!isIdle) {
@@ -213,7 +218,7 @@ private fun BoxScope.TimerRingSection(
                 .clip(CircleShape)
                 // 实心主色 + 白字（夜航香槟底配深墨字，白字压亮金对比只有 2.3:1）
                 .background(SolidColor(Primary))
-                .pressScale()
+                .pressScale(onPressChange = onControlPressChange)
                 .clickable(onClick = onTogglePause),
             contentAlignment = Alignment.Center,
         ) {
@@ -281,6 +286,10 @@ fun TimerScreen(
     // 时长弹层里的临时值：每次打开都从当前选中时长起步，确定后才写回
     var pickerMinutes by remember { mutableStateOf(0) }
     var showPomodoroSheet by remember { mutableStateOf(false) }
+    // 玻璃拟态的受光响应用：主按钮是否被按住（低频 boolean，不破坏上面的 10Hz 隔离）
+    var controlPressed by remember { mutableStateOf(false) }
+    // 触感：Apple 的计时器按钮是"视觉 + 触感"双反馈，只有视觉会显得空
+    val haptics = LocalHapticFeedback.current
 
     LaunchedEffect(completed) {
         if (completed != null) onCompleted()
@@ -460,7 +469,10 @@ fun TimerScreen(
                     isIdle = isIdle,
                     reducedMotion = reducedMotion,
                     frozenPaintingP = frozenPaintingP,
+                    controlPressed = controlPressed,
+                    onControlPressChange = { controlPressed = it },
                     onTogglePause = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                         if (phase == AppViewModel.TimerPhase.RUNNING) viewModel.pauseFocus()
                         else viewModel.resumeFocus()
                     },
@@ -476,11 +488,14 @@ fun TimerScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Button(
-                        onClick = { viewModel.startFocus() },
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.startFocus()
+                        },
                         modifier = Modifier
                             .weight(1f)
                             .height(Dimens.ButtonHeightHero)
-                            .pressScale(),
+                            .pressScale(onPressChange = { controlPressed = it }),
                         shape = ActivePalette.buttonShape,
                         colors = ButtonDefaults.buttonColors(containerColor = Primary),
                     ) {
@@ -532,11 +547,14 @@ fun TimerScreen(
                         Text("取消", color = ErrorRed, fontSize = 15.sp, fontWeight = FontWeight.Medium)
                     }
                     Button(
-                        onClick = { viewModel.finishEarly() },
+                        onClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.finishEarly()
+                        },
                         modifier = Modifier
                             .weight(1f)
                             .height(Dimens.ButtonHeight)
-                            .pressScale(),
+                            .pressScale(onPressChange = { controlPressed = it }),
                         shape = ActivePalette.buttonShape,
                         colors = ButtonDefaults.buttonColors(containerColor = Primary),
                     ) {

@@ -3,11 +3,15 @@ package com.example.flowtime.ui.components
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
@@ -43,6 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.flowtime.ui.theme.AccentGreen
@@ -113,6 +118,8 @@ fun RingTimer(
      */
     pigmentProgress: Float = progress,
     centerContent: (@Composable () -> Unit)? = null,
+    /** 玻璃拟态：主按钮被按住时顶缘受光抬一档（Liquid Glass 的交互受光，只对 NOCTURNE 生效） */
+    glassHighlighted: Boolean = false,
 ) {
     val strokePx = with(LocalDensity.current) { strokeWidth.toPx() }
     // 单色极简专属：2dp 细线的像素宽（环中线位置仍沿用 inset，与外主题对齐）
@@ -125,7 +132,7 @@ fun RingTimer(
     // 其余主题的节奏等各自提示词到位后再单独调制。
     val mode = ActivePalette.mode
     val dimFadeMs = when (mode) {
-        // 玻璃拟态禁 duration-100/150：状态淡入淡出一律 500ms 流体缓动；
+        // 玻璃拟态禁用短促缓动（状态过渡要有"流体"感）。
         // 单色极简：Deliberate Slowness（风格规范 duration-500~700 的慢节奏）
         ThemeMode.WATERCOLOR, ThemeMode.NOCTURNE, ThemeMode.MONO -> 600
         // 粒子系统：Quantum Snap —— 提示词要求前景反馈精确快速（duration-150~200）。
@@ -133,10 +140,24 @@ fun RingTimer(
         ThemeMode.PARTICLES -> 200
         else -> 300
     }
+    // 玻璃拟态的暂停/恢复走**弹簧**（Apple：状态切换用弹簧而非固定时长，天然可打断）：
+    // damping 1.0 = 临界阻尼不回弹，stiffness 439 ≈ response 0.3s（(2π/0.3)²）。
+    // 原来 600ms 的 tween 按下去要等 0.6 秒才暗，手感像"没点着"。
+    val ringAlphaSpec: AnimationSpec<Float> = if (mode == ThemeMode.NOCTURNE) {
+        spring(dampingRatio = 1f, stiffness = 439f)
+    } else {
+        tween(dimFadeMs, easing = FastOutSlowInEasing)
+    }
     val ringAlpha by animateFloatAsState(
         targetValue = if (dimmed) 0.55f else 1f,
-        animationSpec = tween(dimFadeMs, easing = FastOutSlowInEasing),
+        animationSpec = ringAlphaSpec,
         label = "ringDim",
+    )
+    // 受光响应：0 = 常规 0.55，1 = 按住时 0.70（弹簧回落，不弹跳）
+    val highlightBoost by animateFloatAsState(
+        targetValue = if (glassHighlighted) 1f else 0f,
+        animationSpec = spring(dampingRatio = 1f, stiffness = 632f),
+        label = "glassHighlight",
     )
 
     // ---- 颜料色：随剩余时间流动（颜料进度 0→1 即剩余时间 1→0）----
@@ -207,9 +228,10 @@ fun RingTimer(
                 }
                 wallArc(-strokePx * 0.5f, 1f)
                 wallArc(strokePx * 0.5f, 0.7f)
-                // 顶缘受光：上半环外壁一条渐弱白高光（光从上方来）
+                // 顶缘受光：上半环外壁一条渐弱白高光（光从上方来）。
+                // 按住主按钮时抬到 0.70（0.55 + 0.15）—— 玻璃对交互有受光响应，但不自发循环
                 drawArc(
-                    color = GlassBorderHigh.copy(alpha = 0.55f * ringA),
+                    color = GlassBorderHigh.copy(alpha = (0.55f + 0.15f * highlightBoost) * ringA),
                     startAngle = -150f, sweepAngle = 120f, useCenter = false,
                     topLeft = Offset(inset - strokePx * 0.5f, inset - strokePx * 0.5f),
                     size = Size(
@@ -514,6 +536,8 @@ fun RingTimer(
             val tickFadeMs = when (mode) {
                 // ⚠️ 死值（水彩走 ReedPaintingTimer，见文件头说明）
                 ThemeMode.WATERCOLOR -> 500
+                // ⚠️ 死值：玻璃拟态已改成**竖向滚动 + 弹簧**（见下面的 transitionSpec），
+                //    这个 250 现在只当 else 分支的兜底值，别再拿它描述夜航的观感。
                 ThemeMode.NOCTURNE -> 250
                 // 单色极简：**硬切**（0 = 不做交叉淡化）。原来跟着规范抄了 500ms，
                 // 但数字每秒才变一次 —— 500ms 淡入 + 500ms 淡出等于新旧数字有一半
@@ -564,11 +588,24 @@ fun RingTimer(
                     targetState = timeText,
                     contentAlignment = Alignment.Center,
                     transitionSpec = {
-                        if (tickFadeMs == 0) {
+                        when {
                             // 硬切：不产生任何过渡帧 —— 数字瞬时替换（见 tickFadeMs 注释）
-                            EnterTransition.None togetherWith ExitTransition.None
-                        } else {
-                            fadeIn(tween(tickFadeMs, easing = FastOutSlowInEasing)) togetherWith
+                            tickFadeMs == 0 ->
+                                EnterTransition.None togetherWith ExitTransition.None
+
+                            // 玻璃拟态：数字**竖向滚动**（新值从下方滑入、旧值向上淡出）。
+                            // 位移只取行高 1/5 —— 读得出"滚动"，又不至于像老虎机。
+                            // 用弹簧（response≈0.25）而非固定时长：每秒重建过渡时能从当前位置重定向，
+                            // 这是 Apple 的"动画随时可打断"；tween 只会从头重放（250ms 交叉淡化 =
+                            // 每秒 25% 时间新旧数字半透明叠印的根因）。
+                            mode == ThemeMode.NOCTURNE -> {
+                                val roll = spring<IntOffset>(dampingRatio = 1f, stiffness = 632f)
+                                val fade = spring<Float>(dampingRatio = 1f, stiffness = 632f)
+                                (slideInVertically(roll) { it / 5 } + fadeIn(fade)) togetherWith
+                                    (slideOutVertically(roll) { -it / 5 } + fadeOut(fade))
+                            }
+
+                            else -> fadeIn(tween(tickFadeMs, easing = FastOutSlowInEasing)) togetherWith
                                 fadeOut(tween(tickFadeMs, easing = FastOutSlowInEasing))
                         }
                     },
