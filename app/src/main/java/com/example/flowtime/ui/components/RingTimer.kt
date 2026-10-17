@@ -14,8 +14,10 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
@@ -28,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -584,69 +587,63 @@ fun RingTimer(
             // 保留固定宽度容器与水墨晕影；跳秒时只有文字内容静态更新。
 
             Box {
-                AnimatedContent(
-                    targetState = timeText,
-                    contentAlignment = Alignment.Center,
-                    transitionSpec = {
-                        when {
-                            // 硬切：不产生任何过渡帧 —— 数字瞬时替换（见 tickFadeMs 注释）
-                            tickFadeMs == 0 ->
-                                EnterTransition.None togetherWith ExitTransition.None
+                // 🔴 玻璃拟态必须**逐位**滚动：整串 AnimatedContent(targetState = "12:34")
+                //    会让 5 个字符一起滑 —— 秒数一变"整块时间"都在动。秒表只该动变化的那一位。
+                if (mode == ThemeMode.NOCTURNE) {
+                    RollingClockText(text = timeText, color = timeColor, width = clockWidthDp)
+                } else {
+                    AnimatedContent(
+                        targetState = timeText,
+                        contentAlignment = Alignment.Center,
+                        transitionSpec = {
+                            when {
+                                // 硬切：不产生任何过渡帧 —— 数字瞬时替换（见 tickFadeMs 注释）
+                                tickFadeMs == 0 ->
+                                    EnterTransition.None togetherWith ExitTransition.None
 
-                            // 玻璃拟态：数字**竖向滚动**（新值从下方滑入、旧值向上淡出）。
-                            // 位移只取行高 1/5 —— 读得出"滚动"，又不至于像老虎机。
-                            // 用弹簧（response≈0.25）而非固定时长：每秒重建过渡时能从当前位置重定向，
-                            // 这是 Apple 的"动画随时可打断"；tween 只会从头重放（250ms 交叉淡化 =
-                            // 每秒 25% 时间新旧数字半透明叠印的根因）。
-                            mode == ThemeMode.NOCTURNE -> {
-                                val roll = spring<IntOffset>(dampingRatio = 1f, stiffness = 632f)
-                                val fade = spring<Float>(dampingRatio = 1f, stiffness = 632f)
-                                (slideInVertically(roll) { it / 5 } + fadeIn(fade)) togetherWith
-                                    (slideOutVertically(roll) { -it / 5 } + fadeOut(fade))
+                                else -> fadeIn(tween(tickFadeMs, easing = FastOutSlowInEasing)) togetherWith
+                                    fadeOut(tween(tickFadeMs, easing = FastOutSlowInEasing))
                             }
-
-                            else -> fadeIn(tween(tickFadeMs, easing = FastOutSlowInEasing)) togetherWith
-                                fadeOut(tween(tickFadeMs, easing = FastOutSlowInEasing))
-                        }
-                    },
-                    label = "timeTick",
-                ) { text ->
-                    if (mode == ThemeMode.WATERCOLOR) {
-                        // 数字水墨感：同色低透明度错位副本垫在主数字后面，
-                        // 像湿墨在纸上洇出的边（对应预览页 fx「数字水墨感」）
-                        Box(
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 3.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            ClockText(
-                                text = text,
-                                color = WatercolorInk.copy(alpha = 0.12f),
-                                italic = true,
-                                modifier = Modifier
-                                    .width(clockWidthDp)
-                                    .offset(x = 4.dp, y = 3.dp)
-                                    // RenderEffect 模糊，API 31+ 生效；低版本退化为硬边错位影
-                                    .blur(1.5.dp),
-                            )
+                        },
+                        label = "timeTick",
+                    ) { text ->
+                        if (mode == ThemeMode.WATERCOLOR) {
+                            // 数字水墨感：同色低透明度错位副本垫在主数字后面，
+                            // 像湿墨在纸上洇出的边（对应预览页 fx「数字水墨感」）
+                            Box(
+                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 3.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                ClockText(
+                                    text = text,
+                                    color = WatercolorInk.copy(alpha = 0.12f),
+                                    italic = true,
+                                    modifier = Modifier
+                                        .width(clockWidthDp)
+                                        .offset(x = 4.dp, y = 3.dp)
+                                        // RenderEffect 模糊，API 31+ 生效；低版本退化为硬边错位影
+                                        .blur(1.5.dp),
+                                )
+                                ClockText(
+                                    text = text,
+                                    color = timeColor,
+                                    italic = true,
+                                    modifier = Modifier.width(clockWidthDp),
+                                )
+                            }
+                        } else {
                             ClockText(
                                 text = text,
                                 color = timeColor,
-                                italic = true,
+                                italic = false,
+                                fontFamily = when (mode) {
+                                    ThemeMode.MONO -> FontFamily.Monospace
+                                    ThemeMode.PARTICLES -> FontFamily.Monospace
+                                    else -> FontFamily.Serif
+                                },
                                 modifier = Modifier.width(clockWidthDp),
                             )
                         }
-                    } else {
-                        ClockText(
-                            text = text,
-                            color = timeColor,
-                            italic = false,
-                            fontFamily = when (mode) {
-                                ThemeMode.MONO -> FontFamily.Monospace
-                                ThemeMode.PARTICLES -> FontFamily.Monospace
-                                else -> FontFamily.Serif
-                            },
-                            modifier = Modifier.width(clockWidthDp),
-                        )
                     }
                 }
             }
@@ -682,4 +679,70 @@ private fun ClockText(
         letterSpacing = 2.sp,
         color = color,
     )
+}
+
+/**
+ * 逐位滚动的时钟数字（玻璃拟态专用）。
+ *
+ * 🔴 为什么必须按位拆开：`AnimatedContent(targetState = timeText)` 的 target 是**整串** "12:34"，
+ *    秒数一变整串就换了 → 5 个字符一起滑，等于"整块时间"在动（2026-10-17 他一句
+ *    "怎么是整个时间动"点出来的）。这里每一位一个定宽槽位、target 是**单个字符**：
+ *    没变的位不产生任何过渡，只有真正变化的那一位（通常是最右位）滚动。
+ *
+ * 定宽槽位不是多余的：衬线数字不等宽，某位从 1 变 8 会把后面的位往右推。
+ */
+@Composable
+private fun RollingClockText(
+    text: String,
+    color: Color,
+    width: Dp,
+) {
+    val density = LocalDensity.current
+    val measurer = rememberTextMeasurer()
+    // 必须与 ClockText 同款样式，否则量出来的宽度和实际绘制对不上
+    val style = remember {
+        TextStyle(
+            fontFamily = FontFamily.Serif,
+            fontSize = 64.sp,
+            fontWeight = FontWeight.Light,
+            letterSpacing = 2.sp,
+        )
+    }
+    val digitWidth = remember(style) {
+        ('0'..'9').maxOf { measurer.measure(it.toString(), style).size.width }
+    }
+    val colonWidth = remember(style) { measurer.measure(":", style).size.width }
+
+    Row(
+        modifier = Modifier.width(width),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        text.forEach { ch ->
+            val slotPx = if (ch.isDigit()) digitWidth else colonWidth
+            // clipToBounds 把进出场裁在槽位内 —— 这才是"滚轮"的样子；
+            // 不裁的话新数字会从下面飘出来压到模式文案上
+            Box(Modifier.width(with(density) { slotPx.toDp() }).clipToBounds()) {
+                if (ch.isDigit()) {
+                    // 同一位上字符没变时，AnimatedContent 不会产生任何过渡帧
+                    AnimatedContent(
+                        targetState = ch,
+                        contentAlignment = Alignment.Center,
+                        transitionSpec = {
+                            val roll = spring<IntOffset>(dampingRatio = 1f, stiffness = 632f)
+                            val fade = spring<Float>(dampingRatio = 1f, stiffness = 632f)
+                            (slideInVertically(roll) { it / 5 } + fadeIn(fade)) togetherWith
+                                (slideOutVertically(roll) { -it / 5 } + fadeOut(fade))
+                        },
+                        label = "digitRoll",
+                    ) { c ->
+                        ClockText(text = c.toString(), color = color, italic = false)
+                    }
+                } else {
+                    // 冒号不参与滚动，否则每次跳秒它也跟着动
+                    ClockText(text = ch.toString(), color = color, italic = false)
+                }
+            }
+        }
+    }
 }
