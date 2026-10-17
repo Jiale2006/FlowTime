@@ -20,11 +20,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.rememberScrollState
@@ -66,7 +64,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
@@ -95,7 +92,6 @@ import com.example.flowtime.ui.theme.Dimens
 import com.example.flowtime.ui.theme.DisabledGray
 import com.example.flowtime.ui.theme.ErrorRed
 import com.example.flowtime.ui.theme.MutedSurface
-import com.example.flowtime.ui.theme.OnChampagne
 import com.example.flowtime.ui.theme.PaperElevated
 import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.SurfaceCard
@@ -124,8 +120,6 @@ private fun BoxScope.TimerRingSection(
     reducedMotion: Boolean,
     frozenPaintingP: MutableFloatState,
     controlPressed: Boolean,
-    onControlPressChange: (Boolean) -> Unit,
-    onTogglePause: () -> Unit,
 ) {
     val timer = timerState.value
     val displayMillis = when {
@@ -209,30 +203,6 @@ private fun BoxScope.TimerRingSection(
             },
             glassHighlighted = controlPressed,
         )
-    }
-    if (!isIdle) {
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .offset(y = 28.dp)
-                .size(88.dp)
-                .clip(CircleShape)
-                // 实心主色 + 白字（夜航香槟底配深墨字，白字压亮金对比只有 2.3:1）
-                .background(SolidColor(Primary))
-                .pressScale(onPressChange = onControlPressChange)
-                .clickable(onClick = onTogglePause),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                text = if (timer.phase == AppViewModel.TimerPhase.RUNNING) "暂停" else "继续",
-                color = when (ActivePalette.mode) {
-                    ThemeMode.NOCTURNE -> OnChampagne
-                    else -> Color.White
-                },
-                fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-            )
-        }
     }
 }
 
@@ -469,12 +439,6 @@ fun TimerScreen(
                     reducedMotion = reducedMotion,
                     frozenPaintingP = frozenPaintingP,
                     controlPressed = controlPressed,
-                    onControlPressChange = { controlPressed = it },
-                    onTogglePause = {
-                        localView.hapticTick()
-                        if (phase == AppViewModel.TimerPhase.RUNNING) viewModel.pauseFocus()
-                        else viewModel.resumeFocus()
-                    },
                 )
             }
 
@@ -536,25 +500,15 @@ fun TimerScreen(
                     }
                 }
             } else {
-                // 操作区沿用原版（他 2026-10-17 23:36 定："结束和暂停还是之前的好的"）：
-                // 环底悬浮 88dp 暂停圆 + 底部横排「取消 / 结束」两个宽按钮。
-                // iOS 双圆那版已回退，别再改回去。
+                // 运行态操作区（2026-10-17 23:45 按"只要不是圆的"重做）：
+                // 底部一排两个**等宽矩形按钮**（沿用主题的 buttonShape）—— 暂停/继续 + 结束并记录；
+                // 取消降为下方小字。环上不再叠任何圆形浮动按钮（那颗 88dp 圆会压住环）。
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedButton(
-                        onClick = {
-                            localView.hapticTick()
-                            showCancelConfirm = true
-                        },
-                        modifier = Modifier.weight(1f).height(Dimens.ButtonHeight).pressScale(),
-                        shape = ActivePalette.buttonShape,
-                        border = BorderStroke(1.dp, ErrorRed),
-                    ) {
-                        Text("取消", color = ErrorRed, fontSize = 15.sp, fontWeight = FontWeight.Medium)
-                    }
                     Button(
                         onClick = {
-                            localView.hapticConfirm()
-                            viewModel.finishEarly()
+                            localView.hapticTick()
+                            if (phase == AppViewModel.TimerPhase.RUNNING) viewModel.pauseFocus()
+                            else viewModel.resumeFocus()
                         },
                         modifier = Modifier
                             .weight(1f)
@@ -564,15 +518,40 @@ fun TimerScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = Primary),
                     ) {
                         Text(
+                            text = if (phase == AppViewModel.TimerPhase.RUNNING) "暂停" else "继续",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Light,
+                        )
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            localView.hapticConfirm()
+                            viewModel.finishEarly()
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(Dimens.ButtonHeight)
+                            .pressScale(),
+                        shape = ActivePalette.buttonShape,
+                        border = BorderStroke(1.dp, BorderColor),
+                    ) {
+                        Text(
                             text = when (mode) {
                                 AppViewModel.TimerMode.COUNT_UP -> "完成"
                                 AppViewModel.TimerMode.POMODORO -> "结束本轮"
                                 AppViewModel.TimerMode.COUNT_DOWN -> "结束并记录"
                             },
                             fontSize = 15.sp,
-                            fontWeight = FontWeight.Light,
+                            fontWeight = FontWeight.Medium,
+                            color = Primary,
                         )
                     }
+                }
+                TextButton(onClick = {
+                    localView.hapticTick()
+                    showCancelConfirm = true
+                }) {
+                    Text("取消本轮", color = ErrorRed, fontSize = 13.sp)
                 }
             }
             Spacer(Modifier.height(Dimens.ListBottomGap))
