@@ -33,7 +33,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -75,7 +75,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val viewModel: AppViewModel = viewModel()
-            val themeMode by viewModel.themeMode.collectAsState()
+            val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
             // 注册主窗口根视图：主题径向揭示用它截旧主题画面（见 ThemeReveal）
             val rootComposeView = androidx.compose.ui.platform.LocalView.current
             androidx.compose.runtime.LaunchedEffect(rootComposeView) {
@@ -134,7 +134,7 @@ fun FlowTimeApp(viewModel: AppViewModel = viewModel()) {
 
     // 首次进入计时态时请求通知权限（Android 13+，前台服务常驻通知需要）
     val context = LocalContext.current
-    val timer by viewModel.timer.collectAsState()
+    val timer by viewModel.timer.collectAsStateWithLifecycle()
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { }

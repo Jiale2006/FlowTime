@@ -40,7 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -86,10 +86,10 @@ fun TasksScreen(
     viewModel: AppViewModel,
     onOpenTask: (String) -> Unit,
 ) {
-    val tasks by viewModel.tasks.collectAsState()
-    val records by viewModel.records.collectAsState()
-    val settings by viewModel.settings.collectAsState()
-    val newTaskRequest by viewModel.newTaskRequest.collectAsState()
+    val tasks by viewModel.tasks.collectAsStateWithLifecycle()
+    val records by viewModel.records.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val newTaskRequest by viewModel.newTaskRequest.collectAsStateWithLifecycle()
     // 视图模式持久化到设置里：退出应用再进来保持上次的选择
     val gridView = !settings.taskListView
     var showEditor by remember { mutableStateOf(false) }

@@ -31,7 +31,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -86,8 +86,8 @@ fun TaskDetailScreen(
     onOpenTask: (String) -> Unit = {},
     onOpenAllRecords: (String) -> Unit = {},
 ) {
-    val tasks by viewModel.tasks.collectAsState()
-    val records by viewModel.records.collectAsState()
+    val tasks by viewModel.tasks.collectAsStateWithLifecycle()
+    val records by viewModel.records.collectAsStateWithLifecycle()
     val task = tasks.firstOrNull { it.id == taskId }
     val parentTask = task?.parentId?.let { parentId -> tasks.firstOrNull { it.id == parentId } }
     val children = tasks.filter { it.parentId == taskId }
@@ -110,7 +110,7 @@ fun TaskDetailScreen(
     var editingRecord by remember { mutableStateOf<FocusRecord?>(null) }
     var deletedRecord by remember { mutableStateOf<FocusRecord?>(null) }
     // 刚补录进来、还在撤销窗口里的记录（状态在 ViewModel，补录页返回后这里才读得到）
-    val lastAdded = viewModel.lastAddedRecord.collectAsState().value
+    val lastAdded = viewModel.lastAddedRecord.collectAsStateWithLifecycle().value
     val (cardColor, cardFg) = TaskCardPalette[(task?.colorIndex ?: 0) % TaskCardPalette.size]
 
     Box(

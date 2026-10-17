@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -47,7 +48,10 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.MutableFloatState
+import androidx.compose.runtime.State
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -102,6 +106,130 @@ import com.example.flowtime.ui.theme.ThemeMode
 
 private const val COUNT_UP_PAINT_TOTAL_MS = 60L * 60L * 1000L
 
+/**
+ * 环 / 芦苇河 + 大号时间数字 + 暂停按钮。
+ *
+ * 🔴 **这里故意在 body 里读 `timerState.value`（10Hz）**：ticker 每 100ms 改一次 elapsedMillis，
+ *    读点就是它。把这块从 `TimerScreen` 的 body 里隔离出去以后，屏幕其余部分（任务卡 / 模式 chip /
+ *    按钮 / 底部导航）只在 phase、mode 这类低频字段变化时才重组 —— 2026-10-17 性能审计：
+ *    原来整个计时页每秒重组 10 次。
+ */
+@Composable
+private fun BoxScope.TimerRingSection(
+    timerState: State<AppViewModel.TimerState>,
+    isIdle: Boolean,
+    reducedMotion: Boolean,
+    frozenPaintingP: MutableFloatState,
+    onTogglePause: () -> Unit,
+) {
+    val timer = timerState.value
+    val displayMillis = when {
+        timer.mode == AppViewModel.TimerMode.COUNT_UP -> timer.elapsedMillis
+        isIdle -> timer.totalMillis
+        else -> timer.remainingMillis
+    }
+    // 「芦苇河」画作：前半程显影（到 50% 时遮挡光斑散尽、整画全显），
+    // 后半程芦苇逐支随风摆动。时间线 focusFrac = 真实进度：
+    // 倒计时/番茄专注段 = elapsed/total；正计时 = elapsed/虚拟1小时（封顶，走满触发钤印）；
+    // 显影进度 paintingP：倒计时 = focusFrac×2 封顶 1；正计时 = 开四次方前紧后松曲线；
+    // 番茄休息段冻结；待机显示整画幻影（低透明度预告"专注会画出什么"）。
+    var focusFrac = when {
+        timer.mode == AppViewModel.TimerMode.COUNT_UP ->
+            (timer.elapsedMillis / COUNT_UP_PAINT_TOTAL_MS.toFloat()).coerceIn(0f, 1f)
+        isIdle -> 1f
+        else -> 1f - timer.progress
+    }
+    var paintingP = if (timer.mode == AppViewModel.TimerMode.COUNT_UP) {
+        // 正计时显影走"前紧后松"曲线（四次方根，虚拟总长 1 小时）：
+        // 15min≈7成、30min≈8成5、45min≈9成5、1h 收满——短会话也有"画出大半"的满足感
+        Math.sqrt(Math.sqrt(focusFrac.toDouble())).toFloat()
+    } else {
+        (focusFrac * 2f).coerceAtMost(1f)
+    }
+    if (timer.inBreak) paintingP = frozenPaintingP.floatValue
+    if (!isIdle && !timer.inBreak) frozenPaintingP.floatValue = paintingP
+    // 钤印只认走满（与显影解耦，显影在半程就到 1 了）
+    val paintingCompleted = focusFrac >= 1f && !isIdle
+    val modeLabel = when {
+        timer.inBreak -> "番茄计时 · 休息中 · 第 ${timer.round} 轮已完成"
+        timer.mode == AppViewModel.TimerMode.COUNT_UP -> "正计时"
+        timer.mode == AppViewModel.TimerMode.POMODORO ->
+            "番茄计时 · 第 ${timer.round} 轮专注"
+        else -> "倒计时"
+    }
+    if (ActivePalette.mode == ThemeMode.WATERCOLOR) {
+        // 水彩主题：「芦苇河」画作显影（替代圆环）
+        // 风：显影走完（半程）后起风，吹的是全显的画
+        val windActive = !isIdle && !timer.inBreak &&
+            focusFrac >= 0.5f && timer.phase != AppViewModel.TimerPhase.PAUSED
+        Box {
+            ReedPaintingTimer(
+                progress = paintingP,
+                timeText = formatClock(displayMillis),
+                modeLabel = modeLabel,
+                modifier = Modifier
+                    .fillMaxHeight(0.94f)
+                    .fillMaxWidth(),
+                completed = paintingCompleted,
+                windActive = windActive,
+                ghost = isIdle,
+                dimmed = timer.phase == AppViewModel.TimerPhase.PAUSED,
+                reducedMotion = reducedMotion,
+            )
+        }
+    } else {
+        RingTimer(
+            progress = if (isIdle) 1f else timer.progress,
+            // 颜料时间线 = 已用比例（倒计时/番茄：剩余→已用要取反；正计时本来就是
+            // 小时周期内的已用比例；待机显示起步色）。之前直接传剩余比例，
+            // 导致开场就是香槟金、结尾反而变蓝——"越紧迫越金"整个反了。
+            pigmentProgress = when {
+                isIdle -> 0f
+                timer.mode == AppViewModel.TimerMode.COUNT_UP -> timer.progress
+                else -> 1f - timer.progress
+            },
+            timeText = formatClock(displayMillis),
+            modifier = Modifier.fillMaxHeight(0.94f),
+            dimmed = timer.phase == AppViewModel.TimerPhase.PAUSED,
+            centerContent = if (!isIdle) {
+                {
+                    Text(
+                        text = modeLabel,
+                        fontSize = 13.sp,
+                        color = TextSecondary,
+                    )
+                }
+            } else {
+                null
+            },
+        )
+    }
+    if (!isIdle) {
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .offset(y = 28.dp)
+                .size(88.dp)
+                .clip(CircleShape)
+                // 实心主色 + 白字（夜航香槟底配深墨字，白字压亮金对比只有 2.3:1）
+                .background(SolidColor(Primary))
+                .pressScale()
+                .clickable(onClick = onTogglePause),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = if (timer.phase == AppViewModel.TimerPhase.RUNNING) "暂停" else "继续",
+                color = when (ActivePalette.mode) {
+                    ThemeMode.NOCTURNE -> OnChampagne
+                    else -> Color.White
+                },
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun TimerScreen(
@@ -109,15 +237,31 @@ fun TimerScreen(
     onNavigateToTasks: () -> Unit,
     onCompleted: () -> Unit,
 ) {
-    val timer by viewModel.timer.collectAsState()
-    val tasks by viewModel.tasks.collectAsState()
-    val completed by viewModel.completedRecord.collectAsState()
-    val selectedDuration by viewModel.selectedDurationMinutes.collectAsState()
-    val categories by viewModel.categories.collectAsState()
-    val settings by viewModel.settings.collectAsState()
-    val records by viewModel.records.collectAsState()
-    val task = tasks.firstOrNull { it.id == timer.selectedTaskId }
-    val isIdle = timer.phase == AppViewModel.TimerPhase.IDLE
+    // 🔴 10Hz 隔离（2026-10-17 性能审计）：ticker 每 100ms 改一次 elapsedMillis，若在屏幕 body
+    //    直接 `by collectAsStateWithLifecycle()` 读，整个 TimerScreen 每 100ms 重组一次（子组件接未 remember 的
+    //    lambda，基本都跳不过）。所以：保留 State 对象本身不拆包，body 只读下面这些**低频**字段，
+    //    需要毫秒的区域全部收进 TimerRingSection 内部读。
+    val timerState = viewModel.timer.collectAsStateWithLifecycle()
+    val phase by remember { derivedStateOf { timerState.value.phase } }
+    val mode by remember { derivedStateOf { timerState.value.mode } }
+    val inBreak by remember { derivedStateOf { timerState.value.inBreak } }
+    val round by remember { derivedStateOf { timerState.value.round } }
+    val selectedTaskId by remember { derivedStateOf { timerState.value.selectedTaskId } }
+    // 只在进入/离开"最后 5 秒"时翻一次，不是每 100ms 变一次
+    val urgent by remember {
+        derivedStateOf {
+            timerState.value.mode != AppViewModel.TimerMode.COUNT_UP &&
+                timerState.value.remainingMillis in 1..5_000L
+        }
+    }
+    val tasks by viewModel.tasks.collectAsStateWithLifecycle()
+    val completed by viewModel.completedRecord.collectAsStateWithLifecycle()
+    val selectedDuration by viewModel.selectedDurationMinutes.collectAsStateWithLifecycle()
+    val categories by viewModel.categories.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val records by viewModel.records.collectAsStateWithLifecycle()
+    val task = tasks.firstOrNull { it.id == selectedTaskId }
+    val isIdle = phase == AppViewModel.TimerPhase.IDLE
     val reducedMotion = rememberReducedMotion()
     val ambient = rememberAmbientParticlesState()
     // 「芦苇河」显影进度在番茄休息段冻结（休息不算专注，画不生长）
@@ -131,7 +275,7 @@ fun TimerScreen(
     var showTaskPicker by remember { mutableStateOf(false) }
     var showBackfill by remember { mutableStateOf(false) }
     // 撤销条读 ViewModel：补录弹窗关掉后由本页接着弹撤销
-    val lastAdded = viewModel.lastAddedRecord.collectAsState().value
+    val lastAdded = viewModel.lastAddedRecord.collectAsStateWithLifecycle().value
     var showCancelConfirm by remember { mutableStateOf(false) }
     var showDurationPicker by remember { mutableStateOf(false) }
     // 时长弹层里的临时值：每次打开都从当前选中时长起步，确定后才写回
@@ -164,20 +308,14 @@ fun TimerScreen(
         ) {
             AmbientParticles(
                 state = ambient,
-                active = timer.phase == AppViewModel.TimerPhase.RUNNING,
+                active = phase == AppViewModel.TimerPhase.RUNNING,
                 modifier = Modifier.matchParentSize(),
                 // 整页铺开后面积约 ×2.5，数量按可见比例补到这里（不必等比例）
                 targetCount = 32,
                 // 🔴 禁区圆心纵向比例：圆环区在内容区约 38% 高度处（任务卡之下、按钮之上）。
                 //    不能沿用默认 0.5 —— 那是"画布中心"，全屏后已在屏幕正中，禁区会挖错位置。
                 keepOutCenterYFraction = 0.38f,
-                intensity = if (timer.mode != AppViewModel.TimerMode.COUNT_UP &&
-                    timer.remainingMillis in 1..5_000L
-                ) {
-                    1.6f
-                } else {
-                    1f
-                },
+                intensity = if (urgent) 1.6f else 1f,
             )
         }
         Column(
@@ -238,7 +376,7 @@ fun TimerScreen(
                 // 计时模式：切换模式不再弹窗（时长统一走右下角按钮）；
                 // 番茄计时只在首次切换时自动说明一次结构，之后直接切换
                 ModeSelector(
-                    selected = timer.mode,
+                    selected = mode,
                     onSelect = { mode ->
                         viewModel.selectMode(mode)
                         if (mode == AppViewModel.TimerMode.POMODORO && !settings.pomodoroTipShown) {
@@ -282,10 +420,10 @@ fun TimerScreen(
                             )
                             Text(
                                 text = when {
-                                    timer.inBreak -> "休息中 · 第 ${timer.round} 轮已完成"
-                                    timer.mode == AppViewModel.TimerMode.POMODORO ->
-                                        "第 ${timer.round} 轮专注中"
-                                    timer.mode == AppViewModel.TimerMode.COUNT_UP -> "正计时中"
+                                    inBreak -> "休息中 · 第 $round 轮已完成"
+                                    mode == AppViewModel.TimerMode.POMODORO ->
+                                        "第 $round 轮专注中"
+                                    mode == AppViewModel.TimerMode.COUNT_UP -> "正计时中"
                                     else -> "倒计时中"
                                 },
                                 fontSize = 12.sp,
@@ -314,123 +452,19 @@ fun TimerScreen(
                     ),
                 contentAlignment = Alignment.Center,
             ) {
-                val displayMillis = when {
-                    timer.mode == AppViewModel.TimerMode.COUNT_UP -> timer.elapsedMillis
-                    isIdle -> timer.totalMillis
-                    else -> timer.remainingMillis
-                }
-                // 「芦苇河」画作：前半程显影（到 50% 时遮挡光斑散尽、整画全显），
-                // 后半程芦苇逐支随风摆动。时间线 focusFrac = 真实进度：
-                // 倒计时/番茄专注段 = elapsed/total；正计时 = elapsed/虚拟1小时（封顶，走满触发钤印）；
-                // 显影进度 paintingP：倒计时 = focusFrac×2 封顶 1；正计时 = 开四次方前紧后松曲线；
-                // 番茄休息段冻结；待机显示整画幻影（低透明度预告"专注会画出什么"）。
-                var focusFrac = when {
-                    timer.mode == AppViewModel.TimerMode.COUNT_UP ->
-                        (timer.elapsedMillis / COUNT_UP_PAINT_TOTAL_MS.toFloat()).coerceIn(0f, 1f)
-                    isIdle -> 1f
-                    else -> 1f - timer.progress
-                }
-                var paintingP = if (timer.mode == AppViewModel.TimerMode.COUNT_UP) {
-                    // 正计时显影走"前紧后松"曲线（四次方根，虚拟总长 1 小时）：
-                    // 15min≈7成、30min≈8成5、45min≈9成5、1h 收满——短会话也有"画出大半"的满足感
-                    Math.sqrt(Math.sqrt(focusFrac.toDouble())).toFloat()
-                } else {
-                    (focusFrac * 2f).coerceAtMost(1f)
-                }
-                if (timer.inBreak) paintingP = frozenPaintingP.floatValue
-                if (!isIdle && !timer.inBreak) frozenPaintingP.floatValue = paintingP
-                // 钤印只认走满（与显影解耦，显影在半程就到 1 了）
-                val paintingCompleted = focusFrac >= 1f && !isIdle
-                val modeLabel = when {
-                    timer.inBreak -> "番茄计时 · 休息中 · 第 ${timer.round} 轮已完成"
-                    timer.mode == AppViewModel.TimerMode.COUNT_UP -> "正计时"
-                    timer.mode == AppViewModel.TimerMode.POMODORO ->
-                        "番茄计时 · 第 ${timer.round} 轮专注"
-                    else -> "倒计时"
-                }
-                if (ActivePalette.mode == ThemeMode.WATERCOLOR) {
-                    // 水彩主题：「芦苇河」画作显影（替代圆环）
-                    // 风：显影走完（半程）后起风，吹的是全显的画
-                    val windActive = !isIdle && !timer.inBreak &&
-                        focusFrac >= 0.5f && timer.phase != AppViewModel.TimerPhase.PAUSED
-                    Box {
-                        ReedPaintingTimer(
-                            progress = paintingP,
-                            timeText = formatClock(displayMillis),
-                            modeLabel = modeLabel,
-                            modifier = Modifier
-                                .fillMaxHeight(0.94f)
-                                .fillMaxWidth(),
-                            completed = paintingCompleted,
-                            windActive = windActive,
-                            ghost = isIdle,
-                            dimmed = timer.phase == AppViewModel.TimerPhase.PAUSED,
-                            reducedMotion = reducedMotion,
-                        )
-                    }
-                } else {
-                    RingTimer(
-                        progress = if (isIdle) 1f else timer.progress,
-                        // 颜料时间线 = 已用比例（倒计时/番茄：剩余→已用要取反；正计时本来就是
-                        // 小时周期内的已用比例；待机显示起步色）。之前直接传剩余比例，
-                        // 导致开场就是香槟金、结尾反而变蓝——"越紧迫越金"整个反了。
-                        pigmentProgress = when {
-                            isIdle -> 0f
-                            timer.mode == AppViewModel.TimerMode.COUNT_UP -> timer.progress
-                            else -> 1f - timer.progress
-                        },
-                        timeText = formatClock(displayMillis),
-                    modifier = Modifier.fillMaxHeight(0.94f),
-                    dimmed = timer.phase == AppViewModel.TimerPhase.PAUSED,
-                    centerContent = if (!isIdle) {
-                        {
-                            Text(
-                                text = when {
-                                    timer.inBreak -> "番茄计时 · 休息中 · 第 ${timer.round} 轮已完成"
-                                    timer.mode == AppViewModel.TimerMode.COUNT_UP -> "正计时"
-                                    timer.mode == AppViewModel.TimerMode.POMODORO ->
-                                        "番茄计时 · 第 ${timer.round} 轮专注"
-                                    else -> "倒计时"
-                                },
-                                fontSize = 13.sp,
-                                color = TextSecondary,
-                            )
-                        }
-                    } else {
-                        null
+                // 环 + 大号数字是**唯一**按 10Hz 变化的区域，整体收进 TimerRingSection：
+                // 只有它在内部读 elapsedMillis / remainingMillis / progress，
+                // 屏幕 body 因此不再每 100ms 重组（2026-10-17 性能审计）。
+                TimerRingSection(
+                    timerState = timerState,
+                    isIdle = isIdle,
+                    reducedMotion = reducedMotion,
+                    frozenPaintingP = frozenPaintingP,
+                    onTogglePause = {
+                        if (phase == AppViewModel.TimerPhase.RUNNING) viewModel.pauseFocus()
+                        else viewModel.resumeFocus()
                     },
                 )
-                }
-                if (!isIdle) {
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .offset(y = 28.dp)
-                            .size(88.dp)
-                            .clip(CircleShape)
-                            // 实心主色 + 白字（夜航香槟底配深墨字，白字压亮金对比只有 2.3:1）
-                            .background(SolidColor(Primary))
-                            .pressScale()
-                            .clickable {
-                                if (timer.phase == AppViewModel.TimerPhase.RUNNING) {
-                                    viewModel.pauseFocus()
-                                } else {
-                                    viewModel.resumeFocus()
-                                }
-                            },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = if (timer.phase == AppViewModel.TimerPhase.RUNNING) "暂停" else "继续",
-                            color = when (ActivePalette.mode) {
-                                ThemeMode.NOCTURNE -> OnChampagne
-                                else -> Color.White
-                            },
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Medium,
-                        )
-                    }
-                }
             }
 
             Spacer(Modifier.height(if (isIdle) 18.dp else 36.dp))
@@ -453,10 +487,10 @@ fun TimerScreen(
                         Text("开始专注", fontSize = 16.sp, fontWeight = FontWeight.Light)
                     }
                     // 时长按钮：待机时点它即可选倒计时时长（番茄则看结构说明）
-                    if (timer.mode != AppViewModel.TimerMode.COUNT_UP) {
+                    if (mode != AppViewModel.TimerMode.COUNT_UP) {
                         OutlinedButton(
                             onClick = {
-                                if (timer.mode == AppViewModel.TimerMode.POMODORO) {
+                                if (mode == AppViewModel.TimerMode.POMODORO) {
                                     showPomodoroSheet = true
                                 } else {
                                     // 弹层从当前已选时长起步：按钮上显示 30min，弹层里也该是 30min。
@@ -475,7 +509,7 @@ fun TimerScreen(
                             border = BorderStroke(1.dp, BorderColor),
                         ) {
                             Text(
-                                text = if (timer.mode == AppViewModel.TimerMode.POMODORO) {
+                                text = if (mode == AppViewModel.TimerMode.POMODORO) {
                                     "${settings.pomodoroFocusMinutes}+${settings.pomodoroBreakMinutes}min"
                                 } else {
                                     durationLabel(selectedDuration)
@@ -507,7 +541,7 @@ fun TimerScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = Primary),
                     ) {
                         Text(
-                            text = when (timer.mode) {
+                            text = when (mode) {
                                 AppViewModel.TimerMode.COUNT_UP -> "完成"
                                 AppViewModel.TimerMode.POMODORO -> "结束本轮"
                                 AppViewModel.TimerMode.COUNT_DOWN -> "结束并记录"
@@ -540,7 +574,8 @@ fun TimerScreen(
             title = { Text("取消计时", fontWeight = FontWeight.Medium) },
             text = {
                 Text(
-                    "已计时 ${formatElapsed(timer.elapsedMillis)}，取消后将被丢弃，不会计入专注记录。确定取消吗？",
+                    // 只在弹窗打开时才读毫秒（弹窗关着就不读，不会拖累整页重组）
+                    "已计时 ${formatElapsed(timerState.value.elapsedMillis)}，取消后将被丢弃，不会计入专注记录。确定取消吗？",
                     fontSize = 14.sp,
                     color = TextSecondary,
                 )

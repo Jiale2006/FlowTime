@@ -69,7 +69,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -132,8 +132,8 @@ private enum class SettingsDialog { PROFILE, THEME, DURATION, POMODORO, RINGTONE
  */
 @Composable
 fun SettingsScreen(viewModel: AppViewModel) {
-    val settings by viewModel.settings.collectAsState()
-    val themeMode by viewModel.themeMode.collectAsState()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
+    val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var dialog by remember { mutableStateOf<SettingsDialog?>(null) }
 
@@ -739,7 +739,7 @@ private fun StatusHint(text: String, action: String, onClick: () -> Unit) {
 /** 个人资料：换头像（系统照片选择器，无需存储权限）+ 改昵称 */
 @Composable
 private fun ProfileDialog(viewModel: AppViewModel, onDismiss: () -> Unit) {
-    val live by viewModel.settings.collectAsState()
+    val live by viewModel.settings.collectAsStateWithLifecycle()
     // 昵称只取打开弹窗时的初值，后续设置变化不覆盖用户正在输入的内容
     var nickname by remember { mutableStateOf(viewModel.settings.value.nickname) }
 

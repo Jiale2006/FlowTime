@@ -27,7 +27,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,7 +59,7 @@ fun CompletionScreen(
     viewModel: AppViewModel,
     onContinue: () -> Unit,
 ) {
-    val record by viewModel.completedRecord.collectAsState()
+    val record by viewModel.completedRecord.collectAsStateWithLifecycle()
     val fireworks = rememberFireworksState()
     var contentVisible by remember { mutableStateOf(false) }
 

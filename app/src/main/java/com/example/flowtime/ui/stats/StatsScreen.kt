@@ -39,7 +39,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -95,11 +95,11 @@ import com.example.flowtime.ui.theme.WarningAmber
  */
 @Composable
 fun StatsScreen(viewModel: AppViewModel) {
-    val stats by viewModel.stats.collectAsState()
-    val rangeStats by viewModel.rangeStats.collectAsState()
-    val records by viewModel.records.collectAsState()
-    val tasks by viewModel.tasks.collectAsState()
-    val categories by viewModel.categories.collectAsState()
+    val stats by viewModel.stats.collectAsStateWithLifecycle()
+    val rangeStats by viewModel.rangeStats.collectAsStateWithLifecycle()
+    val records by viewModel.records.collectAsStateWithLifecycle()
+    val tasks by viewModel.tasks.collectAsStateWithLifecycle()
+    val categories by viewModel.categories.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     var entrancePlayed by remember { mutableStateOf(false) }

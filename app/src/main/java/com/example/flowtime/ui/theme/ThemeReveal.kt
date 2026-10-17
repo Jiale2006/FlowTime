@@ -2,6 +2,7 @@ package com.example.flowtime.ui.theme
 
 import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.PorterDuff
 import android.view.View
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
@@ -39,6 +40,9 @@ object ThemeReveal {
     /** 主窗口根 ComposeView（MainActivity 注册），截图用它拿旧主题画面 */
     var rootView: View? = null
 
+    /** 复用同一块位图：每次切主题都新建 5MB 会把 GC 拽起来，尺寸不变就重画旧的 */
+    private var reusableBmp: Bitmap? = null
+
     fun start(centerPx: Offset, oldSnapshot: ImageBitmap?) {
         snapshot = oldSnapshot
         center = centerPx
@@ -54,8 +58,14 @@ object ThemeReveal {
         val v = rootView ?: return null
         if (v.width == 0 || v.height == 0) return null
         return runCatching {
-            val bmp = Bitmap.createBitmap(v.width / 2 + 1, v.height / 2 + 1, Bitmap.Config.ARGB_8888)
+            val w = v.width / 2 + 1
+            val h = v.height / 2 + 1
+            // 尺寸不变就复用（1080×2400 半分辨率约 5MB，每次切主题新分配一次纯属浪费）
+            val bmp = reusableBmp?.takeIf { it.width == w && it.height == h && !it.isRecycled }
+                ?: Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also { reusableBmp = it }
             val c = Canvas(bmp)
+            // 复用时先清空，否则上一张的像素会从新画面没盖到的地方透出来
+            c.drawColor(0, PorterDuff.Mode.CLEAR)
             c.scale(0.5f, 0.5f)
             v.draw(c)
             bmp.asImageBitmap()

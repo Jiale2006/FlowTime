@@ -32,7 +32,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,8 +80,8 @@ fun AllRecordsScreen(
     initialTaskId: String?,
     onBack: () -> Unit,
 ) {
-    val records by viewModel.records.collectAsState()
-    val tasks by viewModel.tasks.collectAsState()
+    val records by viewModel.records.collectAsStateWithLifecycle()
+    val tasks by viewModel.tasks.collectAsStateWithLifecycle()
     val zone = remember { ZoneId.systemDefault() }
 
     var selectedTaskId by remember(initialTaskId) { mutableStateOf<String?>(initialTaskId) }
@@ -186,21 +186,28 @@ fun AllRecordsScreen(
                     }
                 }
             } else {
+                // 🔴 分组行只算一次（原来写在 items() 里 = 每次重组都重新 groupBy + 分配）；
+                //    并且必须带 key：没 key 时按索引认，删一条整列表重建、animateItem 也失效。
+                val rows = remember(filtered) { recordsAsRows(filtered) }
                 LazyColumn(contentPadding = PaddingValues(bottom = Dimens.ListBottomGap)) {
-                    items(recordsAsRows(filtered)) { item ->
+                    items(rows, key = { it.key }) { item ->
                         when (item) {
-                            is RecordListItem.DayHeader -> DayHeader(item)
-                            is RecordListItem.Entry -> {
-                                RecordRow(
-                                    record = item.record,
-                                    showTaskName = true,
-                                    onEditDuration = { editingRecord = item.record },
-                                    onDelete = {
-                                        deletedRecord = item.record
-                                        viewModel.deleteRecord(item.record.id)
-                                    },
-                                )
-                                RecordDivider()
+                            is RecordListItem.DayHeader -> Box(Modifier.animateItem()) {
+                                DayHeader(item)
+                            }
+                            is RecordListItem.Entry -> Box(Modifier.animateItem()) {
+                                Column {
+                                    RecordRow(
+                                        record = item.record,
+                                        showTaskName = true,
+                                        onEditDuration = { editingRecord = item.record },
+                                        onDelete = {
+                                            deletedRecord = item.record
+                                            viewModel.deleteRecord(item.record.id)
+                                        },
+                                    )
+                                    RecordDivider()
+                                }
                             }
                         }
                     }
@@ -393,8 +400,16 @@ private fun PickerRow(name: String, indent: Boolean, selected: Boolean, onClick:
 }
 
 private sealed interface RecordListItem {
-    data class DayHeader(val date: LocalDate, val minutes: Int) : RecordListItem
-    data class Entry(val record: FocusRecord) : RecordListItem
+    /** LazyColumn 稳定 key：日期头按日期、条目按记录 id */
+    val key: Any
+
+    data class DayHeader(val date: LocalDate, val minutes: Int) : RecordListItem {
+        override val key: Any get() = "day-$date"
+    }
+
+    data class Entry(val record: FocusRecord) : RecordListItem {
+        override val key: Any get() = "rec-${record.id}"
+    }
 }
 
 @Composable
