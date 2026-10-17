@@ -547,11 +547,21 @@ fun TimerScreen(
                         )
                     }
                 }
-                TextButton(onClick = {
-                    localView.hapticTick()
-                    showCancelConfirm = true
-                }) {
-                    Text("取消本轮", color = ErrorRed, fontSize = 13.sp)
+                TextButton(
+                    onClick = {
+                        localView.hapticTick()
+                        showCancelConfirm = true
+                    },
+                    // 13sp 是"注释级"字号，和上面 15sp 的按钮并排会觉得像小字附注；
+                    // 抬到 14sp Medium，并把触控高度补到 48dp（TextButton 默认只有 40dp）
+                    modifier = Modifier.heightIn(min = 48.dp),
+                ) {
+                    Text(
+                        text = "取消本轮",
+                        color = ErrorRed,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
                 }
             }
             Spacer(Modifier.height(Dimens.ListBottomGap))
