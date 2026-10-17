@@ -729,7 +729,10 @@ private fun RollingClockText(
                         targetState = ch,
                         contentAlignment = Alignment.Center,
                         transitionSpec = {
-                            val roll = spring<IntOffset>(dampingRatio = 1f, stiffness = 632f)
+                            // 位移慢、透明度快：滚动放慢到 response≈0.4s（Apple「移动/画中画」档
+                            // stiffness=(2π/0.4)²≈247），但淡入仍是 0.25s —— 否则数字会长时间
+                            // 半透明地晃着，看着发虚。两种速度分开调才是"玻璃"该有的手感。
+                            val roll = spring<IntOffset>(dampingRatio = 1f, stiffness = 247f)
                             val fade = spring<Float>(dampingRatio = 1f, stiffness = 632f)
                             (slideInVertically(roll) { it / 5 } + fadeIn(fade)) togetherWith
                                 (slideOutVertically(roll) { -it / 5 } + fadeOut(fade))
