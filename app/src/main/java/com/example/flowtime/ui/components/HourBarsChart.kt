@@ -1,8 +1,5 @@
 package com.example.flowtime.ui.components
 
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,11 +11,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -44,9 +36,6 @@ fun HourBarsChart(
         Text("暂无记录，先去完成一次专注吧", fontSize = 13.sp, color = TextPlaceholder)
         return
     }
-    var played by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { played = true }
-
     val peakHour = hourMinutes.indices.maxByOrNull { hourMinutes[it] } ?: 0
     val maxMinutes = maxOf(hourMinutes.maxOrNull() ?: 0, 30)
 
@@ -56,14 +45,10 @@ fun HourBarsChart(
         verticalAlignment = Alignment.Bottom,
     ) {
         hourMinutes.forEachIndexed { hour, minutes ->
-            val grow by animateFloatAsState(
-                targetValue = if (played) 1f else 0f,
-                animationSpec = tween(
-                    durationMillis = 520,
-                    delayMillis = startDelayMillis + 60 + hour * 20,
-                    easing = FastOutSlowInEasing,
-                ),
-                label = "hourGrow$hour",
+            // 动画对象是"归一化柱高"本身：首次从 0 长出（逐根错峰），切范围时从当前高度走过去
+            val fill = rememberGrowingFloat(
+                target = minutes.toFloat() / maxMinutes,
+                enterDelayMillis = startDelayMillis + 60 + hour * 20,
             )
             Column(
                 modifier = Modifier.weight(1f),
@@ -72,7 +57,7 @@ fun HourBarsChart(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height((3 + 96f * minutes / maxMinutes * grow).dp)
+                        .height((3 + 96f * fill).dp)
                         .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
                         .background(if (hour == peakHour) Primary else AccentGreen.copy(alpha = 0.5f)),
                 )

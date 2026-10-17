@@ -1,12 +1,6 @@
 package com.example.flowtime.ui.components
 
 import android.provider.Settings
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -17,10 +11,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.composed
-import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -47,36 +38,6 @@ fun rememberReducedMotion(): Boolean {
             Settings.Global.ANIMATOR_DURATION_SCALE,
             1f,
         ) == 0f
-    }
-}
-
-/** 流光扫过（用于已解锁徽章、达标进度条）：对角渐变高光循环扫过 */
-fun Modifier.shimmerSweep(
-    enabled: Boolean,
-    color: Color = Color.White,
-): Modifier = composed {
-    if (!enabled) return@composed this
-    val transition = rememberInfiniteTransition(label = "shimmer")
-    val progress by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            tween(1800, easing = LinearEasing),
-            RepeatMode.Restart,
-        ),
-        label = "shimmerProgress",
-    )
-    drawWithContent {
-        drawContent()
-        val sweepWidth = size.width * 0.35f
-        val x = -sweepWidth + (size.width + sweepWidth * 2) * progress
-        drawRect(
-            brush = Brush.linearGradient(
-                colors = listOf(Color.Transparent, color.copy(alpha = 0.35f), Color.Transparent),
-                start = Offset(x, 0f),
-                end = Offset(x + sweepWidth, size.height),
-            ),
-        )
     }
 }
 

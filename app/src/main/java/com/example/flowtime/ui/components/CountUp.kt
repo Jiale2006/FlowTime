@@ -1,5 +1,6 @@
 package com.example.flowtime.ui.components
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -11,8 +12,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.example.flowtime.ui.theme.Motion
 
 /**
  * 带过冲的缓动曲线（业界常说的 easeOutBack）：先冲过目标约 10%，再回落稳住。
@@ -71,4 +74,37 @@ fun rememberCountUpFloat(
         label = "countUpFloat",
     )
     return animated
+}
+
+/**
+ * 柱/弧的"填充比例"：**动画对象是数值本身**，不是出场倍率。
+ *
+ * 为什么不用「倍率 × 数据」那套：倍率只在 `LaunchedEffect(Unit)` 里从 0 跑到 1 一次，
+ * 之后切范围（今日/本周/本月）数据变了倍率不动 → 柱子整块**瞬跳**。
+ * 这里第一次从 0 长到 [target]（带错峰延迟），之后每次 [target] 变化都从**当前值**
+ * 重定向（`Animatable` 天然可打断），所以数值是"走"过去的而不是跳过去的。
+ *
+ * @param enterDelayMillis 只作用于首次入场；后续数据变化不再延迟（否则切范围要等错峰）
+ */
+@Composable
+fun rememberGrowingFloat(
+    target: Float,
+    enterDelayMillis: Int = 0,
+    enterDurationMillis: Int = Motion.DurationChartEnter,
+    easing: Easing = Motion.EaseOut,
+): Float {
+    val anim = remember { Animatable(0f) }
+    var entered by remember { mutableStateOf(false) }
+    LaunchedEffect(target) {
+        anim.animateTo(
+            targetValue = target,
+            animationSpec = tween(
+                durationMillis = if (entered) Motion.DurationDataChange else enterDurationMillis,
+                delayMillis = if (entered) 0 else enterDelayMillis,
+                easing = easing,
+            ),
+        )
+        entered = true
+    }
+    return anim.value
 }

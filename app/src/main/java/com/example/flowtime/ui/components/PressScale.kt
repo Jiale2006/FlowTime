@@ -14,16 +14,28 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import com.example.flowtime.ui.theme.ActivePalette
+import com.example.flowtime.ui.theme.Motion
+import com.example.flowtime.ui.theme.ThemeMode
 
 /**
- * 柔和按压（水彩规则）：按下轻微内收至 0.98，抬起缓慢回到原位。
- * 使用 400ms ease-out 液态缓动，禁止弹簧回弹与快速缓动（duration-150 / linear）。
+ * 柔和按压：按下轻微内收至 0.98，抬起回到原位。
+ *
+ * 时长分主题（2026-10-17 动效审计）：
+ * - 水彩：沿用规范里的「液态慢收」400ms —— 风格提示词明文禁止快速缓动，别动。
+ * - 其余主题：120ms 强 ease-out。按压反馈必须跟手：400ms 的 FastOutSlowIn 前 100ms
+ *   只走 17%，scale 才变 0.34%，肉眼等同"按了没反应"。
  */
 fun Modifier.pressScale(): Modifier = composed {
+    val slowLiquid = ActivePalette.mode == ThemeMode.WATERCOLOR
     var pressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         targetValue = if (pressed) 0.98f else 1f,
-        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
+        animationSpec = if (slowLiquid) {
+            tween(durationMillis = 400, easing = FastOutSlowInEasing)
+        } else {
+            tween(durationMillis = Motion.DurationPress, easing = Motion.EaseOut)
+        },
         label = "pressScale",
     )
     this

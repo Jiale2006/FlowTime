@@ -79,6 +79,7 @@ import com.example.flowtime.ui.theme.DividerColor
 import com.example.flowtime.ui.theme.Gold
 import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.Dimens
+import com.example.flowtime.ui.theme.Motion
 import com.example.flowtime.ui.theme.PrimaryLight
 import com.example.flowtime.ui.theme.SuccessGreen
 import com.example.flowtime.ui.theme.TextPlaceholder
@@ -927,7 +928,7 @@ private fun peakHourRange(hourMinutes: List<Int>): String? {
     return "%02d:00-%02d:00".format(peakHour, peakHour + 1)
 }
 
-/** 分区错峰入场：淡入 + 上滑（进入减速曲线） */
+/** 分区错峰入场：淡入 + 上滑（强 ease-out：起步快、收尾稳） */
 @Composable
 private fun Entrance(
     played: Boolean,
@@ -936,12 +937,12 @@ private fun Entrance(
 ) {
     val alpha by animateFloatAsState(
         targetValue = if (played) 1f else 0f,
-        animationSpec = tween(420, delayMillis = delayMillis, easing = FastOutSlowInEasing),
+        animationSpec = tween(Motion.DurationEnter, delayMillis = delayMillis, easing = Motion.EaseOut),
         label = "entranceAlpha",
     )
     val offsetY by animateDpAsState(
         targetValue = if (played) 0.dp else 24.dp,
-        animationSpec = tween(420, delayMillis = delayMillis, easing = FastOutSlowInEasing),
+        animationSpec = tween(Motion.DurationEnter, delayMillis = delayMillis, easing = Motion.EaseOut),
         label = "entranceOffset",
     )
     Box(Modifier.graphicsLayer { this.alpha = alpha; translationY = offsetY.toPx() }) {

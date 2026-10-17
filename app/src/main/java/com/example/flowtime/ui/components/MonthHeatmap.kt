@@ -1,6 +1,6 @@
 package com.example.flowtime.ui.components
 
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.BgPrimary
+import com.example.flowtime.ui.theme.Motion
 import com.example.flowtime.ui.theme.SurfaceCard
 import com.example.flowtime.ui.theme.TextPlaceholder
 import com.example.flowtime.ui.theme.TextSecondary
@@ -67,7 +68,7 @@ fun MonthHeatmap(
     LaunchedEffect(Unit) { played = true }
     val reveal by animateFloatAsState(
         targetValue = if (played) 1f else 0f,
-        animationSpec = tween(700, easing = FastOutSlowInEasing),
+        animationSpec = tween(Motion.DurationChartEnter, easing = Motion.EaseOut),
         label = "heatReveal",
     )
 
@@ -95,7 +96,12 @@ fun MonthHeatmap(
                         // 首尾的占位格：保持列宽一致，不画东西
                         Box(Modifier.weight(1f).aspectRatio(1f))
                     } else {
-                        val fill = heatColor(cell)
+                        // 切换月份时格子颜色按数据 tween 过去（原来直接换色 = 整片瞬跳）
+                        val fill by animateColorAsState(
+                            targetValue = heatColor(cell),
+                            animationSpec = tween(Motion.DurationDataChange, easing = Motion.EaseOut),
+                            label = "heatCellColor",
+                        )
                         Box(
                             modifier = Modifier
                                 .weight(1f)

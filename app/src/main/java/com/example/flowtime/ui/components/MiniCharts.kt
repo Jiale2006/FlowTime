@@ -1,8 +1,5 @@
 package com.example.flowtime.ui.components
 
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,11 +7,6 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -38,13 +30,10 @@ fun DonutChart(
     centerSubtext: String,
     modifier: Modifier = Modifier,
 ) {
-    var played by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { played = true }
-    val reveal by animateFloatAsState(
-        targetValue = if (played) 1f else 0f,
-        animationSpec = tween(900, easing = FastOutSlowInEasing),
-        label = "donutReveal",
-    )
+    // 🔴 动画对象是每条切片的**占比本身**，不是"出场倍率 × 占比"：
+    //    倍率只用 LaunchedEffect(Unit) 跑一次，之后切「今日/本周/本月」数据变了倍率不动 → 圆环瞬跳。
+    //    现在每条切片首次从 0 张开，之后按当前比例重定向（Animatable 可打断）。
+    val animatedFractions = slices.map { slice -> rememberGrowingFloat(slice.fraction) }
 
     Box(modifier = modifier.aspectRatio(1f), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
@@ -53,8 +42,8 @@ fun DonutChart(
             val arcSize = Size(size.width - inset * 2, size.height - inset * 2)
             val topLeft = Offset(inset, inset)
             var startAngle = -90f
-            slices.forEach { slice ->
-                val sweepAngle = 360f * slice.fraction * reveal
+            slices.forEachIndexed { index, slice ->
+                val sweepAngle = 360f * animatedFractions[index]
                 if (sweepAngle > 0f) {
                     drawArc(
                         color = slice.color,

@@ -1,8 +1,5 @@
 package com.example.flowtime.ui.components
 
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -97,9 +94,6 @@ fun WeeklyBarRow(
     todayColor: Color = Primary,
     countDelayMillis: Int = 0,
 ) {
-    var played by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { played = true }
-
     val maxMinutes = maxOf(days.maxOfOrNull { it.minutes } ?: 0, 30)
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -107,10 +101,10 @@ fun WeeklyBarRow(
         verticalAlignment = Alignment.Bottom,
     ) {
         days.forEachIndexed { index, day ->
-            val grow by animateFloatAsState(
-                targetValue = if (played) 1f else 0f,
-                animationSpec = tween(520, delayMillis = countDelayMillis + 80 + index * 22, easing = FastOutSlowInEasing),
-                label = "weekBarGrow$index",
+            // 🔴 动画对象是归一化柱高本身（不是出场倍率）：切周/切范围时柱子走位而不是瞬跳
+            val fill = rememberGrowingFloat(
+                target = day.minutes.toFloat() / maxMinutes,
+                enterDelayMillis = countDelayMillis + 80 + index * 22,
             )
             Column(
                 modifier = Modifier.weight(1f),
@@ -125,7 +119,7 @@ fun WeeklyBarRow(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height((4 + 106f * day.minutes / maxMinutes * grow).dp)
+                        .height((4 + 106f * fill).dp)
                         .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
                         .background(if (day.isToday) todayColor else barColor),
                 )
@@ -154,8 +148,6 @@ fun DailyBarsStrip(
     countDelayMillis: Int = 0,
 ) {
     if (days.isEmpty()) return
-    var played by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { played = true }
 
     val maxMinutes = maxOf(days.maxOfOrNull { it.minutes } ?: 0, 30)
     val scrollable = days.size > 10
@@ -176,10 +168,10 @@ fun DailyBarsStrip(
         verticalAlignment = Alignment.Bottom,
     ) {
         days.forEachIndexed { index, day ->
-            val grow by animateFloatAsState(
-                targetValue = if (played) 1f else 0f,
-                animationSpec = tween(520, delayMillis = countDelayMillis + 80 + index * 22, easing = FastOutSlowInEasing),
-                label = "dayGrow$index",
+            // 同 [WeeklyBarRow]：动的是归一化柱高，数据变化才不会瞬跳
+            val fill = rememberGrowingFloat(
+                target = day.minutes.toFloat() / maxMinutes,
+                enterDelayMillis = countDelayMillis + 80 + index * 22,
             )
             Column(
                 modifier = if (scrollable) Modifier.width(26.dp) else Modifier.weight(1f),
@@ -195,7 +187,7 @@ fun DailyBarsStrip(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height((4 + 96f * day.minutes / maxMinutes * grow).dp)
+                        .height((4 + 96f * fill).dp)
                         .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
                         .background(if (day.isToday) todayColor else barColor),
                 )
