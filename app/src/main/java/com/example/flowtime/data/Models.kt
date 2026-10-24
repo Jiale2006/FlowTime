@@ -46,7 +46,32 @@ data class FocusTask(
     val colorIndex: Int,
     val iconIndex: Int,
     val parentId: String? = null,
-)
+) {
+    /** 是不是那个虚拟的「自由专注」条目（不落库，只在任务清单/详情页当聚合入口） */
+    val isFreeFocus: Boolean get() = id == FREE_FOCUS_ID
+
+    companion object {
+        /**
+         * 虚拟任务 id：所有 `records.taskId == null` 的记录都归它。
+         *
+         * 为什么要它：自由专注的记录、以及任务被彻底删掉后放生的记录都没有任务可归属，
+         * 任务清单里缺这一条就**无处管理**（他报"自由专注的时长删不掉"，2026-10-24）。
+         * 它**绝不写进 tasks 表** —— 只是一个聚合入口，不参与任何删除/编辑落库。
+         */
+        const val FREE_FOCUS_ID = "__free_focus__"
+
+        fun freeFocus(): FocusTask = FocusTask(
+            id = FREE_FOCUS_ID,
+            name = "自由专注",
+            durationMinutes = 0,
+            dateLabel = "",
+            colorIndex = 0,
+            // 4 = 时间图标（TaskIcons 的 0..13 旧语义，见 TaskIcons.kt）
+            iconIndex = 4,
+            parentId = null,
+        )
+    }
+}
 
 /**
  * 一次完成的专注记录（Room 实体：records 表）。

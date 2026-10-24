@@ -42,7 +42,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.flowtime.ui.theme.TextPrimary
 import com.example.flowtime.ui.theme.TextSecondary
-import kotlin.math.min
+import kotlin.math.cos
+import kotlin.math.max
 import kotlin.math.sin
 
 // ── 纸底与钤印色 ─────────────────────────────────────────────
@@ -58,8 +59,9 @@ private fun easeIO(t: Float) = if (t < 0.5f) 2f * t * t else 1f - Math.pow(-2.0 
 /**
  * 水彩主题计时器：「芦苇河」原作随专注慢慢显影，过半后芦苇逐支随风摆动。
  *
- * - progress ∈ [0,1]：显影进度。倒计时/番茄专注段 = elapsed/total 的两倍封顶
- *   （前半程走完显影，见 TimerScreen）；
+ * - progress ∈ [0,1]：显影进度。**三种计时模式同一条曲线**（四次方根，前紧后松）：
+ *   开场就显影 31%、半程 ≈84%，见 TimerScreen 的 `paintingP`；
+ *   曾经倒计时/番茄用的是 ×2 曲线，遮罩会明显盖很久，与正计时观感不一致（2026-10-24 统一）；
  * - 风场（windActive 由 TimerScreen 决定，当前显影过半后启动）：
  *   底画（reed_base.png，芦苇区已补底）保持静止，
  *   每支芦苇（reed_s0..7.png，用户标注切割出的穗+茎+叶）绕**自己的根部**微旋转，
@@ -136,7 +138,8 @@ fun ReedPaintingTimer(
     LaunchedEffect(completed) {
         if (completed) {
             sealAlpha.snapTo(0f)
-            sealAlpha.animateTo(1f, tween(600, easing = FastOutSlowInEasing))
+            // 2026-10-23：600 → 900ms。盖章是"压下去再回弹"，太快像弹窗淡入
+            sealAlpha.animateTo(1f, tween(900, easing = FastOutSlowInEasing))
         } else {
             sealAlpha.snapTo(0f)
         }
@@ -169,12 +172,14 @@ fun ReedPaintingTimer(
 
             val img = base ?: fallback
             if (img != null) {
-                // 素材画布 934×1685，等比铺满画布
-                val scale = min(size.width / img.width, size.height / img.height)
+                // 方案 B：竖幅画改为铺满宽度（cover），优先保留底部芦苇/河岸，
+                // 多余高度全部从顶部裁掉。显影光斑、风摆精灵都按同一个 rect 计算，
+                // 裁切后仍与画面对齐。
+                val scale = max(size.width / img.width, size.height / img.height)
                 val dw = img.width * scale
                 val dh = img.height * scale
                 val dx = (size.width - dw) / 2f
-                val dy = (size.height - dh) / 2f
+                val dy = size.height - dh
                 val rect = Rect(Offset(dx, dy), Size(dw, dh))
                 val useStalks = base != null && stalks.none { it == null }
 
@@ -193,8 +198,10 @@ fun ReedPaintingTimer(
                     )
 
                     if (useStalks) {
-                        // 每支芦苇绕根部微旋转：行波按根部 x 从左向右扫，
-                        // 主摆（慢，长节奏）+ 细颤（快，小幅度）；远景支减半。
+                        // 每支芦苇绕根部微旋转：行波按根部 x 从左向右扫。
+                        // 2026-10-23 细化：幅度降一半（3.0→2.2）、细颤频率抬高（2.3→3.1）、
+                        // 相位不再掺支序 i（原来 i*0.8 会让相邻支莫名错拍），改为按 rootX 派生频率
+                        // （±18%）——每支略有自己的节奏，整片才不会像一块板在晃。
                         val tsec = ts * 0.001f
                         stalkSpecs.forEachIndexed { i, s ->
                             val sprite = stalks[i] ?: return@forEachIndexed
@@ -202,10 +209,12 @@ fun ReedPaintingTimer(
                             val dstY = dy + s.y * dh
                             val dstW = s.sw * dw
                             val dstH = s.sh * dw
-                            val amp = if (s.distant) 0.5f else 1f
+                            val amp = if (s.distant) 0.45f else 1f
+                            val freq = 0.86f + (s.rootX * 4.7f % 0.36f)
+                            val phase = s.rootX * 6.5f
                             val ang = wind * amp * (
-                                3.0f * sin(tsec * 0.9f - s.rootX * 6.5f + i * 0.8f) +
-                                    0.7f * sin(tsec * 2.3f - s.rootX * 11f + i * 1.9f)
+                                2.2f * sin(tsec * 0.9f * freq - phase) +
+                                    0.55f * sin(tsec * 3.1f * (0.7f + freq * 0.3f) - phase * 1.7f + 0.9f)
                                 )
                             val pivot = Offset(dstX + s.px * dstW, dstY + s.py * dstH)
                             rotate(ang, pivot = pivot) {
@@ -219,6 +228,9 @@ fun ReedPaintingTimer(
                     }
 
                     // L2：显影遮罩（软边光斑按作画顺序洇开）
+                    // 2026-10-23 细化：原来每个斑只有「白 → 透明」两段色标，边缘是均匀正圆，
+                    // 显影像一团团白雾。现在改成主斑多段柔边（0.78 起转软）+ 两个按自身方位
+                    // 偏出的伴瓣，轮廓不再正圆；伴瓣只在洇开过半后出现，省掉前期的绘制开销。
                     val l2 = androidx.compose.ui.graphics.Paint().apply { blendMode = BlendMode.DstIn }
                     canvas.saveLayer(rect, l2)
                     sceneBlobs.forEach { b ->
@@ -228,29 +240,48 @@ fun ReedPaintingTimer(
                         val a = clamp01f(local * 6f)
                         val cc = Offset(rect.left + b.x * dw, rect.top + b.y * dh)
                         val r = b.r * dw * grow
-                        drawCircle(
-                            brush = Brush.radialGradient(
-                                colors = listOf(
-                                    Color.White.copy(alpha = a),
-                                    Color.White.copy(alpha = 0f),
-                                ),
-                                center = cc,
-                                radius = r,
-                            ),
-                            radius = r,
-                            center = cc,
-                        )
+                        drawRevealBlob(cc, r, a, showLobes = local > 0.22f, seed = b.x * 6.28f + b.y * 3.14f)
                     }
                     canvas.restore()
                     canvas.restore()
                 }
 
-                // 完成：钤印（朱红方章 + 白文，微旋淡入）
+                // 铺满宽度后画顶更接近云层/芦苇，给时间数字留一条纸色渐隐；
+                // 待机幻影没有数字，不加，免得把预览洗淡。
+                // 2026-10-23：120dp 两段 → 152dp 三段，过渡更长更柔，数字不再"悬空"
+                if (!ghost) {
+                    val fadeHeight = 152.dp.toPx()
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0f to PaperBase.copy(alpha = 0.74f),
+                                0.46f to PaperBase.copy(alpha = 0.40f),
+                                1f to Color.Transparent,
+                            ),
+                            startY = 0f,
+                            endY = fadeHeight,
+                        ),
+                        size = Size(size.width, fadeHeight),
+                    )
+                }
+
+                // 完成：钤印（朱红方章 + 白文，微旋淡入）。
+                // 用可见画布而不是素材 rect 定位：顶部裁切后 rect.top 是负数，
+                // 沿用原 rect 会把印章画到屏幕外。
                 if (completed && sealAlpha.value > 0f) {
-                    drawSeal(rect, sealAlpha.value, sc = 1.15f - 0.15f * easeIO(sealAlpha.value), textMeasurer)
+                    drawSeal(
+                        Rect(Offset.Zero, size),
+                        sealAlpha.value,
+                        sc = 1.15f - 0.15f * easeIO(sealAlpha.value),
+                        textMeasurer,
+                    )
                 }
             }
         }
+
+        // 纸纹叠层：纤维 + 颗粒 + 四边做旧。**静态 Canvas**，不读 frameTime，
+        // 所以不进帧循环（纹理每帧重画会白烧 400 次 draw）。
+        PaperGrainOverlay(modifier = Modifier.fillMaxSize())
 
         // 数字与模式小字：压在画作上方干燥区（待机幻影不显示）
         if (!ghost) {
@@ -279,6 +310,12 @@ fun ReedPaintingTimer(
 }
 
 // ── 钤印 ─────────────────────────────────────────────────────
+/**
+ * 朱红方章。2026-10-23 加了"印泥"细节：
+ * ① 章体外渗一圈极淡红（纸吸印泥会晕出 1–2px）；
+ * ② 章体两次叠加、偏移 0.6dp → 印泥厚薄不匀，边缘不再是干净矢量矩形；
+ * ③ 文字也错开一点点（同一次用力，但纸上会有微移）。
+ */
 private fun DrawScope.drawSeal(
     rect: Rect,
     alpha: Float,
@@ -288,18 +325,178 @@ private fun DrawScope.drawSeal(
     val cx = rect.left + rect.width * 0.82f
     val cy = rect.top + rect.height * 0.10f
     val half = 20.dp.toPx() * sc
+    val bleed = 1.06f
+    val nudge = 0.6.dp.toPx()
     rotate(-6f, pivot = Offset(cx, cy)) {
+        // ① 外渗
         drawRoundRect(
-            color = SealRed.copy(alpha = 0.9f * alpha),
+            color = SealRed.copy(alpha = 0.10f * alpha),
+            topLeft = Offset(cx - half * bleed, cy - half * bleed),
+            size = Size(half * 2 * bleed, half * 2 * bleed),
+            cornerRadius = CornerRadius(9.dp.toPx() * sc),
+        )
+        // ② 章体（错位两层）
+        drawRoundRect(
+            color = SealRed.copy(alpha = 0.86f * alpha),
+            topLeft = Offset(cx - half + nudge, cy - half + nudge),
+            size = Size(half * 2, half * 2),
+            cornerRadius = CornerRadius(7.dp.toPx() * sc),
+        )
+        drawRoundRect(
+            color = SealRed.copy(alpha = 0.28f * alpha),
             topLeft = Offset(cx - half, cy - half),
             size = Size(half * 2, half * 2),
             cornerRadius = CornerRadius(7.dp.toPx() * sc),
         )
+        // ③ 白文
         val style = TextStyle(color = SealText.copy(alpha = 0.94f * alpha), fontSize = 15.sp)
         val m1 = textMeasurer.measure("心", style)
         val m2 = textMeasurer.measure("流", style)
-        drawText(m1, topLeft = Offset(cx - m1.size.width / 2f, cy - half * 0.92f))
-        drawText(m2, topLeft = Offset(cx - m2.size.width / 2f, cy + half * 0.92f - m2.size.height))
+        drawText(m1, topLeft = Offset(cx - m1.size.width / 2f + nudge * 0.5f, cy - half * 0.92f))
+        drawText(m2, topLeft = Offset(cx - m2.size.width / 2f + nudge * 0.5f, cy + half * 0.92f - m2.size.height))
+    }
+}
+
+/**
+ * 一个显影斑：主斑多段柔边 + 两个按自身方位偏出的伴瓣（[seed] 决定角度）。
+ * 伴瓣让轮廓从"正圆"变成有机形状——水洇开不会是一个圆。
+ */
+private fun DrawScope.drawRevealBlob(
+    center: Offset,
+    radius: Float,
+    alpha: Float,
+    showLobes: Boolean,
+    seed: Float,
+) {
+    drawCircle(
+        brush = Brush.radialGradient(
+            colorStops = arrayOf(
+                0f to Color.White.copy(alpha = alpha),
+                0.58f to Color.White.copy(alpha = alpha * 0.94f),
+                0.78f to Color.White.copy(alpha = alpha * 0.62f),
+                0.92f to Color.White.copy(alpha = alpha * 0.22f),
+                1f to Color.Transparent,
+            ),
+            center = center,
+            radius = radius,
+        ),
+        radius = radius,
+        center = center,
+    )
+    if (!showLobes) return
+    // 两个伴瓣，角度由 seed（该斑在画面上的位置）决定 → 各斑形状不同
+    val lobeSpecs = floatArrayOf(0.44f, 0.36f)
+    lobeSpecs.forEachIndexed { k, sizeF ->
+        val ang = seed + k * 2.4f
+        val distance = radius * 0.40f
+        val c = Offset(center.x + cos(ang) * distance, center.y + sin(ang) * distance)
+        val rr = radius * sizeF
+        drawCircle(
+            brush = Brush.radialGradient(
+                colorStops = arrayOf(
+                    0f to Color.White.copy(alpha = alpha * 0.46f),
+                    0.66f to Color.White.copy(alpha = alpha * 0.26f),
+                    1f to Color.Transparent,
+                ),
+                center = c,
+                radius = rr,
+            ),
+            radius = rr,
+            center = c,
+        )
+    }
+}
+
+// ── 纸纹（静态叠层） ─────────────────────────────────────────
+private data class PaperFiber(
+    val x: Float,
+    val y: Float,
+    val len: Float,
+    val dy: Float,
+    val alpha: Float,
+    val dark: Boolean,
+)
+
+private data class PaperSpeck(
+    val x: Float,
+    val y: Float,
+    val radiusDp: Float,
+    val alpha: Float,
+    val dark: Boolean,
+)
+
+/**
+ * 纸纤维 + 颗粒 + 四边做旧。
+ *
+ * 🔴 必须挂成**独立静态 Canvas**：它不读 frameTime，不进帧循环。
+ * 若塞进画作那层 Canvas，150 根纤维 + 240 个颗粒会随每一帧重画。
+ *
+ * 颜色只取"暖灰/白"两种（亮暗各半）：全暗会显脏，全亮会显得像屏幕有油污。
+ * 颗粒用固定种子，重组不会跳位置。
+ */
+@Composable
+private fun PaperGrainOverlay(modifier: Modifier = Modifier) {
+    val fibers = remember {
+        val rnd = kotlin.random.Random(20261024)
+        List(150) {
+            PaperFiber(
+                x = rnd.nextFloat() * 1.02f - 0.02f,
+                y = rnd.nextFloat(),
+                len = 0.020f + rnd.nextFloat() * 0.085f,
+                dy = (rnd.nextFloat() - 0.5f) * 0.004f,
+                alpha = 0.018f + rnd.nextFloat() * 0.026f,
+                dark = rnd.nextInt(100) < 62,
+            )
+        }
+    }
+    val specks = remember {
+        val rnd = kotlin.random.Random(20261025)
+        List(240) {
+            PaperSpeck(
+                x = rnd.nextFloat(),
+                y = rnd.nextFloat(),
+                radiusDp = 0.40f + rnd.nextFloat() * 0.95f,
+                alpha = 0.010f + rnd.nextFloat() * 0.024f,
+                dark = rnd.nextBoolean(),
+            )
+        }
+    }
+    Canvas(modifier) {
+        fibers.forEach { fiber ->
+            drawLine(
+                color = if (fiber.dark) {
+                    Color(0xFF8C7659).copy(alpha = fiber.alpha)
+                } else {
+                    Color.White.copy(alpha = fiber.alpha * 0.85f)
+                },
+                start = Offset(size.width * fiber.x, size.height * fiber.y),
+                end = Offset(size.width * (fiber.x + fiber.len), size.height * (fiber.y + fiber.dy)),
+                strokeWidth = 0.7.dp.toPx(),
+            )
+        }
+        specks.forEach { speck ->
+            drawCircle(
+                color = if (speck.dark) {
+                    Color(0xFF7A6349).copy(alpha = speck.alpha)
+                } else {
+                    Color.White.copy(alpha = speck.alpha)
+                },
+                radius = speck.radiusDp.dp.toPx(),
+                center = Offset(size.width * speck.x, size.height * speck.y),
+            )
+        }
+        // 四边做旧：中心完全透明，只在外缘压一层极淡茶色
+        drawRect(
+            brush = Brush.radialGradient(
+                colorStops = arrayOf(
+                    0f to Color.Transparent,
+                    0.62f to Color.Transparent,
+                    1f to Color(0xFF6B5334).copy(alpha = 0.10f),
+                ),
+                center = center,
+                radius = size.maxDimension * 0.78f,
+            ),
+        )
     }
 }
 

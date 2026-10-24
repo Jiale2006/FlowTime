@@ -1,8 +1,10 @@
 package com.example.flowtime.ui.components
 
+import android.content.Context
 import android.provider.Settings
 import androidx.compose.foundation.Canvas
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -17,6 +19,9 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.flowtime.ui.theme.AccentGreen
 import com.example.flowtime.ui.theme.CardGreenLight
 import com.example.flowtime.ui.theme.Gold
@@ -28,18 +33,31 @@ import kotlin.random.Random
 /**
  * 系统「减弱动效」检测（animator_duration_scale == 0 时用户已关闭动画）。
  * 命中时调用方应跳过粒子/呼吸/流光等非必要动效。
+ *
+ * 该开关只能在系统设置里改，用户改完回到 App 时如果没刷新，remember 会一直拿旧值，
+ * 所以 ON_RESUME 时重读一次（与设置页刷新授权状态的写法一致）。
  */
 @Composable
 fun rememberReducedMotion(): Boolean {
     val context = LocalContext.current
-    return remember {
-        Settings.Global.getFloat(
-            context.contentResolver,
-            Settings.Global.ANIMATOR_DURATION_SCALE,
-            1f,
-        ) == 0f
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var reduced by remember { mutableStateOf(readReducedMotion(context)) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) reduced = readReducedMotion(context)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
+    return reduced
 }
+
+private fun readReducedMotion(context: Context): Boolean =
+    Settings.Global.getFloat(
+        context.contentResolver,
+        Settings.Global.ANIMATOR_DURATION_SCALE,
+        1f,
+    ) == 0f
 
 /**
  * 全局呼吸周期（毫秒）：环境粒子的生成节律（呼谷少、吸峰多）用这一份常量。

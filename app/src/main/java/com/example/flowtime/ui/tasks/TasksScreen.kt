@@ -143,6 +143,18 @@ fun TasksScreen(
                 ),
             )
         }
+        // 自由专注排最后：没挂任务的记录（自由计时 + 任务被彻底删后放生的）都归这里。
+        // 一条都没有就不占位，免得列表里凭空多一行空的。
+        if (records.any { it.taskId == null }) {
+            add(
+                TaskRowModel(
+                    task = FocusTask.freeFocus(),
+                    parentName = null,
+                    childCount = 0,
+                    minutes = records.filter { it.taskId == null }.sumOf { it.minutes },
+                ),
+            )
+        }
     }
 
     Box(
@@ -196,7 +208,8 @@ fun TasksScreen(
                             parentName = row.parentName,
                             subtitle = rowSubtitle(row),
                             onClick = { onOpenTask(row.task.id) },
-                            onLongClick = { pendingDelete = row.task },
+                            // 虚拟「自由专注」不落库，长按删除没有意义（也删不掉任何东西）
+                            onLongClick = { if (!row.task.isFreeFocus) pendingDelete = row.task },
                             // 增删任务时平滑让位/淡入，而不是整列突然跳动
                             modifier = Modifier.animateItem(),
                         )
@@ -213,7 +226,7 @@ fun TasksScreen(
                             parentName = row.parentName,
                             subtitle = rowSubtitle(row),
                             onClick = { onOpenTask(row.task.id) },
-                            onLongClick = { pendingDelete = row.task },
+                            onLongClick = { if (!row.task.isFreeFocus) pendingDelete = row.task },
                             // 增删任务时平滑让位/淡入，而不是整列突然跳动
                             modifier = Modifier.animateItem(),
                         )
@@ -243,16 +256,27 @@ fun TasksScreen(
     }
 
     pendingDelete?.let { target ->
-        val childCount = childrenOf(target.id).size
+        val childIds = childrenOf(target.id).map { it.id }
+        val childCount = childIds.size
+        // 这个任务（含子任务）名下会被保留的记录：条数要说清，否则用户不知道删完还剩什么
+        val kept = records.filter { it.taskId != null && it.taskId in (childIds + target.id) }
+        val keptMinutes = kept.sumOf { it.minutes }
         FlowAlertDialog(
             onDismissRequest = { pendingDelete = null },
             title = { Text("删除任务") },
             text = {
                 Text(
-                    if (childCount > 0) {
-                        "「${target.name}」下还有 $childCount 个小任务，删除时会一并删掉。确定吗？"
-                    } else {
-                        "确定删除「${target.name}」吗？"
+                    buildString {
+                        append("确定删除「${target.name}」吗？")
+                        if (childCount > 0) append("\n\n它的 $childCount 个小任务会一并删除。")
+                        if (kept.isNotEmpty()) {
+                            append(
+                                "\n\n它的 ${kept.size} 条专注记录（累计 ${formatMinutesHm(keptMinutes)}）" +
+                                    "会一起移入回收站，随时能连同任务一起恢复。",
+                            )
+                        } else {
+                            append("\n\n这个任务还没有专注记录。")
+                        }
                     },
                 )
             },

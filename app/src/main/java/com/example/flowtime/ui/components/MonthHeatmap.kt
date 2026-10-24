@@ -207,15 +207,20 @@ private fun heatColor(cell: AppViewModel.HeatCell): Color {
  * 专注分钟数 → 主题色阶（5 档）。
  * 刻意**只依赖分钟数**，好让补录日历（[MonthCalendar]）复用同一套观感。
  *
+ * 🔴 档位阈值 = **无记录 / <1h / 1-2h / 2-4h / ≥4h**（2026-10-23 改）。
+ *    原来是 <30 / <60 / <90 / ≥90 —— 那是一天只学半小时的时代定的，
+ *    90 分钟就封顶意味着 1.5h 和 8h 显示同一个颜色，热力图彻底失去区分度
+ *    （他报"4h 不到为什么算多"就是这个原因）。改阈值只动这里，图例颜色自动跟随。
+ *
  * 取色统一走 [ActivePalette.heatRamp]：纸底主题是半透明颜料叠色，深底主题是
  * **不透明**色阶（深底直接用半透明色会读不出趋势，见该属性的说明）。
  */
 fun heatColorOf(minutes: Int): Color {
     val idx = when {
         minutes <= 0 -> 0
-        minutes < 30 -> 1
-        minutes < 60 -> 2
-        minutes < 90 -> 3
+        minutes < 60 -> 1
+        minutes < 120 -> 2
+        minutes < 240 -> 3
         else -> 4
     }
     return ActivePalette.heatRamp.getOrElse(idx) { ActivePalette.cardCream }

@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
@@ -124,6 +125,10 @@ fun RingTimer(
     centerContent: (@Composable () -> Unit)? = null,
     /** 玻璃拟态：主按钮被按住时顶缘受光抬一档（Liquid Glass 的交互受光，只对 NOCTURNE 生效） */
     glassHighlighted: Boolean = false,
+    /** 夜航（玻璃拟态）翻牌时钟用的秒数；别的主题忽略 */
+    timeSeconds: Int = 0,
+    /** 翻牌动画开关（系统"移除动画"或用户关动效时给 false） */
+    flipAnimate: Boolean = true,
 ) {
     val strokePx = with(LocalDensity.current) { strokeWidth.toPx() }
     // 单色极简专属：2dp 细线的像素宽（环中线位置仍沿用 inset，与外主题对齐）
@@ -469,7 +474,12 @@ fun RingTimer(
             }
         }
 
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            // 暂停时与环同步变暗：环的 ringAlpha 已经是动画值，中心数字/文案跟着一起淡，
+            // 否则会出现"环停了、数字还亮着"的状态歧义。
+            modifier = Modifier.graphicsLayer { alpha = ringAlpha },
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
             // 主题节奏：水彩=500ms 液态晕开（用户验收过的洇墨感）；
             // 玻璃=250ms —— 跳秒是每秒高频更新，motion.md 要求频繁交互少动效，
             // 500ms 交叉淡化会让新旧数字长时间叠印重影，250ms 一闪即过
@@ -527,7 +537,18 @@ fun RingTimer(
                 // 🔴 玻璃拟态必须**逐位**滚动：整串 AnimatedContent(targetState = "12:34")
                 //    会让 5 个字符一起滑 —— 秒数一变"整块时间"都在动。秒表只该动变化的那一位。
                 if (mode == ThemeMode.NOCTURNE) {
-                    RollingClockText(text = timeText, color = timeColor, width = clockWidthDp)
+                    // 🔴 玻璃拟态改用机械翻牌（2026-10-24 他要求）：秒级跳动从"逐位滚动"
+                    //    换成绕分割线的 3D 翻页，只有变化的那一位会翻。宽度沿用时钟槽宽，
+                    //    卡片按 aspectRatio 自己分摊；数字色跟主题时间线（月光蓝→香槟）走。
+                    FlipClock(
+                        totalSeconds = timeSeconds,
+                        animate = flipAnimate,
+                        // 一位一卡（4 张）：84dp 卡高时总宽 ≈336dp，塞进 361dp 屏宽正好
+                        cardHeight = 84.dp,
+                        cornerRadius = 8.dp,
+                        // 给圆环笔画留呼吸位；小时/多卡时按剩余宽度自动缩卡
+                        horizontalInset = 12.dp,
+                    )
                 } else {
                     AnimatedContent(
                         targetState = timeText,
@@ -620,6 +641,9 @@ private fun ClockText(
 
 /**
  * 逐位滚动的时钟数字（玻璃拟态专用）。
+ *
+ * ⚠️ **2026-10-24 起已被 [FlipClock] 取代**：他要求夜航改用机械翻牌，本函数当前
+ *    **没有任何调用者**，保留只为回退参考。不要拿它推断夜航的实际观感。
  *
  * 🔴 为什么必须按位拆开：`AnimatedContent(targetState = timeText)` 的 target 是**整串** "12:34"，
  *    秒数一变整串就换了 → 5 个字符一起滑，等于"整块时间"在动（2026-10-17 他一句

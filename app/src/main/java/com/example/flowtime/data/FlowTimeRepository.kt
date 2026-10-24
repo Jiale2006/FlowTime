@@ -9,9 +9,11 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.flowtime.data.db.FlowTimeDatabase
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.util.UUID
@@ -36,6 +38,9 @@ private const val ROLLBACK_KEEP = 5
 class FlowTimeRepository(private val context: Context) {
 
     private val dao = FlowTimeDatabase.get(context).dao()
+
+    /** 回收站：私有目录里的一个 JSON 文件，不碰 Room 表结构 */
+    private val trash = TrashStore(File(context.filesDir, "trash"))
 
     private object Keys {
         // 旧版 JSON：迁移时只读，不再写
@@ -164,10 +169,39 @@ class FlowTimeRepository(private val context: Context) {
         )
     }
 
-    /** 删除任务：连同它下面的小任务一起删（级联）；历史记录保留 */
-    suspend fun deleteTask(taskId: String) {
+    /**
+     * 删除任务：任务（含子任务）**连同它名下的记录**一起进回收站（一次删除动作 = 一条条目）。
+     *
+     * 为什么记录也要挪走：留在表里的话统计会继续显示"已删任务"的名字与分类，
+     * 而墓碑过期解绑 `taskId` 后它们还会按名字"复活"回到统计 —— 删了就该哪儿都看不见。
+     * 挪进回收站仍可恢复；彻底删 / 超 30 天时记录被放生回「未分类」，时长一分不丢。
+     *
+     * 顺序与删记录同一条规矩：**先落回收站再删库**，反了就是真丢数据。
+     */
+    suspend fun deleteTask(taskId: String) = withContext(Dispatchers.IO) {
         val all = dao.tasksOnce()
-        val removeIds = mutableSetOf(taskId)
+        val removeIds = collectSubtree(taskId, all)
+        val removed = all.filter { it.id in removeIds }.sortedBy { it.id != taskId }
+        val names = removed.mapTo(mutableSetOf()) { it.name }
+        val affected = dao.recordsOnce().filter { belongsToAny(it, removeIds, names) }
+        trash.addTask(removed, affected)
+        dao.deleteTasks(removeIds.toList())
+        if (affected.isNotEmpty()) dao.deleteRecords(affected.map { it.id })
+    }
+
+    /**
+     * 记录是否属于这批任务 —— **与 [RecordLink.belongsTo] 同口径**：
+     * 有 `taskId` 按 id 认，没有的（旧数据 / 迁移时没对上名字）按 `taskName` 快照认。
+     *
+     * 只按 id 认会漏掉 `taskId = null` 但名字就是它的老记录 —— 那些记录留在表里，
+     * 统计一按名字归属就又把已删任务显示出来了（2026-10-23 他报的就是这个）。
+     */
+    private fun belongsToAny(record: FocusRecord, ids: Set<String>, names: Set<String>): Boolean =
+        if (record.taskId != null) record.taskId in ids else record.taskName in names
+
+    /** 任务 + 它所有层级的子孙 id（层级本就最多两层，这里仍写成通用的） */
+    private fun collectSubtree(rootId: String, all: List<FocusTask>): Set<String> {
+        val removeIds = mutableSetOf(rootId)
         var changed = true
         while (changed) {
             changed = false
@@ -176,7 +210,7 @@ class FlowTimeRepository(private val context: Context) {
                 if (parent in removeIds && removeIds.add(task.id)) changed = true
             }
         }
-        dao.deleteTasks(removeIds.toList())
+        return removeIds
     }
 
     /** 插一条记录，返回新 rowid */
@@ -187,9 +221,129 @@ class FlowTimeRepository(private val context: Context) {
         dao.updateRecord(record)
     }
 
-    /** 删一条记录 */
-    suspend fun deleteRecord(id: Long) {
-        dao.deleteRecord(id)
+    /** 删一条记录：**先落回收站再删库**（顺序反了就是真丢数据） */
+    suspend fun deleteRecord(record: FocusRecord) = withContext(Dispatchers.IO) {
+        trash.add(record)
+        dao.deleteRecord(record.id)
+    }
+
+    // ---- 回收站 ----
+
+    /** 可恢复的记录（30 天内），最新删的在前面 */
+    suspend fun trashedRecords(): List<TrashedRecord> =
+        withContext(Dispatchers.IO) { trash.all() }
+
+    suspend fun trashCount(): Int = withContext(Dispatchers.IO) { trash.all().size }
+
+    /**
+     * 可恢复的任务（30 天内），最新删的在前面。
+     *
+     * 三件事按顺序做：
+    1. **自愈**：前几版删除逻辑漏下的记录（`taskId = null` 但名字就是它的老记录、
+     *    或者第一版只挪任务没挪记录）还赖在 `records` 表里 → 统计会照着名字把它们
+     *    重新归到已删任务名下。这里扫一遍表补摘进条目，老用户不清数据也干净。
+    2. **过期清理**：超 30 天的条目，记录不销毁，解绑（`taskId = null`）放生回
+     *    `records`，统计里归「自由专注」，时长一分不少。
+    3. 返回剩下的条目。
+     */
+    suspend fun trashedTasks(): List<TrashedTask> = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val loaded = trash.allTasks()
+        var all = loaded
+
+        // 不能只在 `records` 为空时扫 —— 上一版按 taskId 摘过一次、漏掉 `taskId = null`
+        // 的同名老记录，那些条目 records 非空，光看空不空永远发现不了。
+        if (loaded.isNotEmpty()) {
+            val table = dao.recordsOnce()
+            // 只删"刚补摘的"这批：条目里已有的记录早就不在表里，
+            // 它们的 id 可能已被 autoGenerate 复用给别人的记录，误删就是丢数据
+            val pulledIds = mutableListOf<Long>()
+            val fixed = loaded.map { entry ->
+                val entryIds = entry.ids.toMutableSet()
+                val entryNames = entry.tasks.mapTo(mutableSetOf()) { it.name }
+                val known = entry.records.mapTo(mutableSetOf()) { it.id }
+                val extra = table.filter { it.id !in known && belongsToAny(it, entryIds, entryNames) }
+                if (extra.isEmpty()) {
+                    entry
+                } else {
+                    pulledIds += extra.map { it.id }
+                    entry.copy(records = entry.records + extra)
+                }
+            }
+            if (pulledIds.isNotEmpty()) {
+                dao.deleteRecords(pulledIds)
+                trash.replaceTasks(fixed)
+                all = fixed
+            }
+        }
+
+        val (alive, expired) = all.partition { !TrashStore.isExpired(it.deletedAt, now) }
+        if (expired.isNotEmpty()) {
+            expired.forEach { releaseRecords(it.records) }
+            trash.replaceTasks(alive)
+        }
+        alive
+    }
+
+    /**
+     * 恢复一条。
+     * 原 id 可能已被新记录占用 —— Room 的 autoGenerate 在删掉最大 id 后会复用它，
+     * 所以先查一次，被占了就换成新 id 插回，否则主键冲突直接崩。
+     */
+    suspend fun restoreRecord(record: FocusRecord) = withContext(Dispatchers.IO) {
+        val id = if (dao.recordById(record.id) == null) record.id else 0L
+        dao.insertRecord(record.copy(id = id))
+        trash.remove(record.id)
+    }
+
+    /** 永久删除一条回收站记录（不可逆，调用方负责确认） */
+    suspend fun purgeRecord(recordId: Long) = withContext(Dispatchers.IO) { trash.remove(recordId) }
+
+    /**
+     * 恢复一个任务（连同被一起删掉的子任务**和记录**）。
+     *
+     * 先查库里是否已有同 id —— 恢复备份等场景可能已经塞回来过，
+     * 直接 insert 会覆盖现有任务（UUID 撞车概率为零，但这条兜底不花什么钱）。
+     * 记录同理：Room 的 autoGenerate 在删掉最大 id 后会复用，被占了就用新 id。
+     */
+    suspend fun restoreTask(rootId: String) = withContext(Dispatchers.IO) {
+        val entry = trash.allTasks().firstOrNull { it.root.id == rootId } ?: return@withContext
+        val existing = dao.tasksOnce().mapTo(mutableSetOf()) { it.id }
+        val back = entry.tasks.filterNot { it.id in existing }
+        if (back.isNotEmpty()) dao.insertTasks(back)
+        entry.records.forEach { record ->
+            val id = if (dao.recordById(record.id) == null) record.id else 0L
+            dao.insertRecord(record.copy(id = id))
+        }
+        trash.removeTask(rootId)
+    }
+
+    /**
+     * 永久删除一个任务：任务信息彻底丢掉，但它名下的记录**放生**（`taskId = null`）
+     * 回到统计的「未分类」里 —— 时长是已经发生过的事实，不该因为删个任务就消失。
+     */
+    suspend fun purgeTask(rootId: String) = withContext(Dispatchers.IO) {
+        val entry = trash.allTasks().firstOrNull { it.root.id == rootId } ?: return@withContext
+        releaseRecords(entry.records)
+        trash.removeTask(rootId)
+    }
+
+    /** 清空回收站：任务名下的记录同样放生（时长保留），只是不再挂在任何任务上 */
+    suspend fun purgeTrash() = withContext(Dispatchers.IO) {
+        trash.allTasks().forEach { releaseRecords(it.records) }
+        trash.clearTasks()
+        trash.clear()
+    }
+
+    /**
+     * 把记录放生回 `records` 表并解绑（`taskId = null`）：归到「未分类」，时长不动。
+     * 原 id 可能被 autoGenerate 复用，被占了就换成新 id。
+     */
+    private suspend fun releaseRecords(records: List<FocusRecord>) {
+        records.forEach { record ->
+            val id = if (dao.recordById(record.id) == null) record.id else 0L
+            dao.insertRecord(record.copy(id = id, taskId = null))
+        }
     }
 
     suspend fun updateSettings(settings: AppSettings) {

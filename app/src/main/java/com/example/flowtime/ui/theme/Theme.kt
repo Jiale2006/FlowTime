@@ -364,6 +364,11 @@ private fun shapesFor(mode: ThemeMode): Shapes = when (mode) {
         large = RoundedCornerShape(12.dp),      // rounded-xl
         extraLarge = RoundedCornerShape(16.dp),
     )
+    // 单色极简：容器仍守 2dp，但 FilterChip 这类小按钮（M3 取 shapes.small）
+    // 要与自定义按钮的 12dp 对齐，否则同一页会一半圆一半方。
+    ThemeMode.MONO -> Shapes(
+        small = RoundedCornerShape(12.dp),
+    )
     else -> Shapes()
 }
 

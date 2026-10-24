@@ -11,13 +11,9 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.material.icons.Icons
@@ -25,21 +21,13 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -51,20 +39,18 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.completion.CompletionScreen
+import com.example.flowtime.ui.components.FlowTimeBottomBar
 import com.example.flowtime.ui.components.ThemeBackdrop
+import com.example.flowtime.ui.components.TopLevelTab
 import com.example.flowtime.ui.records.AllRecordsScreen
+import com.example.flowtime.ui.records.TrashScreen
 import com.example.flowtime.ui.settings.SettingsScreen
 import com.example.flowtime.ui.stats.StatsScreen
 import com.example.flowtime.ui.tasks.TaskDetailScreen
 import com.example.flowtime.ui.tasks.TasksScreen
 import com.example.flowtime.ui.theme.AdaptiveScale
 import com.example.flowtime.ui.theme.BgPrimary
-import com.example.flowtime.ui.theme.CardGreenLight
-import com.example.flowtime.ui.theme.DividerColor
 import com.example.flowtime.ui.theme.FlowTimeTheme
-import com.example.flowtime.ui.theme.NavContainer
-import com.example.flowtime.ui.theme.NavItemUnselected
-import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.ThemeReveal
 import com.example.flowtime.ui.theme.themeRadialReveal
 import com.example.flowtime.ui.timer.TimerScreen
@@ -116,18 +102,19 @@ private object Routes {
     const val TASK_DETAIL = "taskDetail"
     /** 记录页：可带 taskId（从任务详情进来时默认只筛该任务） */
     const val ALL_RECORDS = "allRecords"
-}
 
-private data class TopLevelRoute(val route: String, val label: String, val icon: ImageVector)
+    /** 回收站：从设置页「其他」组进 */
+    const val TRASH = "trash"
+}
 
 @Composable
 fun FlowTimeApp(viewModel: AppViewModel = viewModel()) {
     val navController = rememberNavController()
     val tabs = listOf(
-        TopLevelRoute(Routes.TIMER, "计时", Icons.Default.Home),
-        TopLevelRoute(Routes.TASKS, "任务", Icons.AutoMirrored.Filled.List),
-        TopLevelRoute(Routes.STATS, "统计", Icons.Default.CheckCircle),
-        TopLevelRoute(Routes.SETTINGS, "设置", Icons.Default.Settings),
+        TopLevelTab(Routes.TIMER, "计时", Icons.Default.Home),
+        TopLevelTab(Routes.TASKS, "任务", Icons.AutoMirrored.Filled.List),
+        TopLevelTab(Routes.STATS, "统计", Icons.Default.CheckCircle),
+        TopLevelTab(Routes.SETTINGS, "设置", Icons.Default.Settings),
     )
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
@@ -157,45 +144,22 @@ fun FlowTimeApp(viewModel: AppViewModel = viewModel()) {
         bottomBar = {
             if (currentRoute != Routes.COMPLETION &&
                 currentRoute?.startsWith(Routes.TASK_DETAIL) != true &&
-                currentRoute?.startsWith(Routes.ALL_RECORDS) != true
+                currentRoute?.startsWith(Routes.ALL_RECORDS) != true &&
+                currentRoute != Routes.TRASH
             ) {
-                Column {
-                    // 玻璃导航条顶边的受光细线（水彩主题下是蓝灰分隔线）
-                    Box(Modifier.fillMaxWidth().height(1.dp).background(DividerColor))
-                    NavigationBar(
-                        containerColor = NavContainer,
-                        tonalElevation = 0.dp,
-                    ) {
-                        tabs.forEach { tab ->
-                            NavigationBarItem(
-                                selected = currentRoute == tab.route,
-                                onClick = {
-                                    if (currentRoute != tab.route) {
-                                        navController.navigate(tab.route) {
-                                            popUpTo(navController.graph.findStartDestination().id) {
-                                                saveState = true
-                                            }
-                                            launchSingleTop = true
-                                            restoreState = true
-                                        }
-                                    }
-                                },
-                                icon = { Icon(tab.icon, contentDescription = tab.label) },
-                                label = { Text(tab.label) },
-                                alwaysShowLabel = true,
-                                // 选中态只变颜色：指示器设为透明（图标/文字位置前后不动，
-                                // 不出现"点到谁谁跳一下"和药丸色块）
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = Primary,
-                                    selectedTextColor = Primary,
-                                    unselectedIconColor = NavItemUnselected,
-                                    unselectedTextColor = NavItemUnselected,
-                                    indicatorColor = Color.Transparent,
-                                ),
-                            )
+                FlowTimeBottomBar(
+                    tabs = tabs,
+                    currentRoute = currentRoute,
+                    onSelect = { tab ->
+                        navController.navigate(tab.route) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
                         }
-                    }
-                }
+                    },
+                )
             }
         },
     ) { innerPadding ->
@@ -298,7 +262,22 @@ fun FlowTimeApp(viewModel: AppViewModel = viewModel()) {
                 }
             }
             composable(Routes.STATS) { TabPage(innerPadding) { StatsScreen(viewModel) } }
-            composable(Routes.SETTINGS) { TabPage(innerPadding) { SettingsScreen(viewModel) } }
+            composable(Routes.SETTINGS) {
+                TabPage(innerPadding) {
+                    SettingsScreen(
+                        viewModel = viewModel,
+                        onOpenTrash = { navController.navigate(Routes.TRASH) },
+                    )
+                }
+            }
+            composable(Routes.TRASH) {
+                FullPage {
+                    TrashScreen(
+                        viewModel = viewModel,
+                        onBack = { navController.popBackStack() },
+                    )
+                }
+            }
             composable(Routes.COMPLETION) {
                 FullPage {
                 CompletionScreen(

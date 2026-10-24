@@ -44,6 +44,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.flowtime.data.FocusRecord
+import com.example.flowtime.data.FocusTask
 import com.example.flowtime.data.RecordLink
 import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.components.DonutChart
@@ -88,7 +89,9 @@ fun TaskDetailScreen(
 ) {
     val tasks by viewModel.tasks.collectAsStateWithLifecycle()
     val records by viewModel.records.collectAsStateWithLifecycle()
+    // 虚拟「自由专注」不落库，进这个路由时现场造一个（它只是聚合入口，见 FocusTask.freeFocus）
     val task = tasks.firstOrNull { it.id == taskId }
+        ?: if (taskId == FocusTask.FREE_FOCUS_ID) FocusTask.freeFocus() else null
     val parentTask = task?.parentId?.let { parentId -> tasks.firstOrNull { it.id == parentId } }
     val children = tasks.filter { it.parentId == taskId }
     // 统计含**直接子任务**：与统计页「分类分布」口径一致（同一个「数学」两页数字终于对得上）
@@ -198,7 +201,10 @@ fun TaskDetailScreen(
                 }
                 Spacer(Modifier.height(14.dp))
 
-                // 小任务：任何任务都可以加，加了它就成为分类/大类
+                // 小任务：任何任务都可以加，加了它就成为分类/大类。
+                // 虚拟的「自由专注」没有子任务（它只是个聚合桶），整块不显示 ——
+                // 否则能给它加出 parentId=__free_focus__ 的孤儿任务。
+                if (task?.isFreeFocus != true) {
                 ProCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(Dimens.CardPadding)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -291,6 +297,7 @@ fun TaskDetailScreen(
                         }
                     }
                 }
+                }
                 Spacer(Modifier.height(14.dp))
 
                 ProCard(modifier = Modifier.fillMaxWidth()) {
@@ -344,7 +351,7 @@ fun TaskDetailScreen(
                                     onEditDuration = { editingRecord = record },
                                     onDelete = {
                                         deletedRecord = record
-                                        viewModel.deleteRecord(record.id)
+                                        viewModel.deleteRecord(record)
                                     },
                                 )
                                 if (index < recent.lastIndex) RecordDivider()
@@ -371,7 +378,9 @@ fun TaskDetailScreen(
                 Button(
                     onClick = {
                         task?.let {
-                            viewModel.selectTask(it.id)
+                            // 虚拟「自由专注」走自由专注路径 —— 直接把 __free_focus__ 当 taskId
+                            // 写进记录的话，会挂一个 tasks 表里不存在的 id
+                            if (it.isFreeFocus) viewModel.selectFreeFocus() else viewModel.selectTask(it.id)
                             viewModel.startFocus()
                             onStartFocus()
                         }
@@ -391,12 +400,14 @@ fun TaskDetailScreen(
             visible = deletedRecord != null || lastAdded != null,
             message = when {
                 lastAdded != null -> "已补录 ${formatMinutesHm(lastAdded.minutes)}"
-                else -> "记录已删除"
+                else -> "已移入回收站"
             },
             accent = if (lastAdded != null) SuccessGreen else WarningAmber,
+            // 两种提示都只停留 1 秒（真正兜底的是回收站）
+            seconds = 1,
             onUndo = {
                 deletedRecord?.let { viewModel.restoreRecord(it) }
-                lastAdded?.let { viewModel.deleteRecord(it.id) }
+                lastAdded?.let { viewModel.deleteRecord(it) }
                 deletedRecord = null
                 viewModel.clearLastAddedRecord()
             },
@@ -411,7 +422,7 @@ fun TaskDetailScreen(
     if (showBackfill) {
         BackfillDialog(
             tasks = tasks,
-            initialTaskId = task?.id,
+            initialTaskId = task?.takeUnless { it.isFreeFocus }?.id,
             records = records,
             onDismiss = { showBackfill = false },
             onConfirm = { picked, startMillis, endMillis ->

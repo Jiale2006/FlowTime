@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -56,11 +57,14 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -85,6 +89,7 @@ import com.example.flowtime.ui.records.BackfillDialog
 import com.example.flowtime.ui.records.RecordUndoBar
 import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.AccentGreen
+import com.example.flowtime.ui.theme.BgPrimary
 import com.example.flowtime.ui.theme.BorderColor
 import com.example.flowtime.ui.theme.CardGreenLight
 import com.example.flowtime.ui.theme.CardOrange
@@ -101,6 +106,7 @@ import com.example.flowtime.ui.theme.TextSecondary
 import com.example.flowtime.ui.theme.WarningAmber
 import java.time.Instant
 import java.time.ZoneId
+import kotlinx.coroutines.delay
 import com.example.flowtime.ui.theme.ThemeMode
 
 private const val COUNT_UP_PAINT_TOTAL_MS = 60L * 60L * 1000L
@@ -120,6 +126,8 @@ private fun BoxScope.TimerRingSection(
     reducedMotion: Boolean,
     frozenPaintingP: MutableFloatState,
     controlPressed: Boolean,
+    /** 当前时间的精确毫秒值（含 tick 间外推），用于把翻页对齐到真实秒边界 */
+    nowMillis: () -> Long,
 ) {
     val timer = timerState.value
     val displayMillis = when {
@@ -127,10 +135,41 @@ private fun BoxScope.TimerRingSection(
         isIdle -> timer.totalMillis
         else -> timer.remainingMillis
     }
-    // 「芦苇河」画作：前半程显影（到 50% 时遮挡光斑散尽、整画全显），
+    // 翻页的秒数不走 10Hz 采样值：按精确剩余时间在真正的秒边界更新，
+    // 环/文字仍用 10Hz，翻页不再随机晚 0–100ms 起手。
+    var flipSeconds by remember { mutableIntStateOf((displayMillis / 1000L).toInt()) }
+    LaunchedEffect(
+        timer.phase,
+        timer.mode,
+        timer.inBreak,
+        timer.round,
+        timer.totalMillis,
+    ) {
+        if (timer.phase != AppViewModel.TimerPhase.RUNNING) return@LaunchedEffect
+        flipSeconds = (nowMillis() / 1000L).toInt()
+        while (true) {
+            val exact = nowMillis()
+            // 倒计时：显示秒在“剩余时间跌破整数秒”时变；正计时：在“达到整数秒”时变
+            val wait = if (timer.mode == AppViewModel.TimerMode.COUNT_UP) {
+                1000L - exact % 1000L
+            } else {
+                exact % 1000L + 1L
+            }
+            delay(wait.coerceAtLeast(1L))
+            flipSeconds = (nowMillis() / 1000L).toInt()
+        }
+    }
+    val clockSeconds = if (timer.phase == AppViewModel.TimerPhase.RUNNING) {
+        flipSeconds
+    } else {
+        (displayMillis / 1000L).toInt()
+    }
+    // 「芦苇河」画作：显影曲线**三种模式统一**（2026-10-24 他要求"参照正计时"），
+    // 用四次方根做「前紧后松」：开场就显影 31%、15 分钟 ≈7 成、半程 ≈84%。
+    // 原来倒计时/番茄走 focusFrac×2（前半程从 0 慢慢洇开），画作上会有一层显影遮罩
+    // 明显盖很久；正计时因为开场就显影大半，看起来"没有遮盖"——两条曲线并存的观感不一致。
     // 后半程芦苇逐支随风摆动。时间线 focusFrac = 真实进度：
     // 倒计时/番茄专注段 = elapsed/total；正计时 = elapsed/虚拟1小时（封顶，走满触发钤印）；
-    // 显影进度 paintingP：倒计时 = focusFrac×2 封顶 1；正计时 = 开四次方前紧后松曲线；
     // 番茄休息段冻结；待机显示整画幻影（低透明度预告"专注会画出什么"）。
     var focusFrac = when {
         timer.mode == AppViewModel.TimerMode.COUNT_UP ->
@@ -138,13 +177,7 @@ private fun BoxScope.TimerRingSection(
         isIdle -> 1f
         else -> 1f - timer.progress
     }
-    var paintingP = if (timer.mode == AppViewModel.TimerMode.COUNT_UP) {
-        // 正计时显影走"前紧后松"曲线（四次方根，虚拟总长 1 小时）：
-        // 15min≈7成、30min≈8成5、45min≈9成5、1h 收满——短会话也有"画出大半"的满足感
-        Math.sqrt(Math.sqrt(focusFrac.toDouble())).toFloat()
-    } else {
-        (focusFrac * 2f).coerceAtMost(1f)
-    }
+    var paintingP = Math.sqrt(Math.sqrt(focusFrac.toDouble())).toFloat()
     if (timer.inBreak) paintingP = frozenPaintingP.floatValue
     if (!isIdle && !timer.inBreak) frozenPaintingP.floatValue = paintingP
     // 钤印只认走满（与显影解耦，显影在半程就到 1 了）
@@ -158,7 +191,7 @@ private fun BoxScope.TimerRingSection(
     }
     if (ActivePalette.mode == ThemeMode.WATERCOLOR) {
         // 水彩主题：「芦苇河」画作显影（替代圆环）
-        // 风：显影走完（半程）后起风，吹的是全显的画
+        // 风：真实进度过半后起风（此时画早已显影完，吹的就是全显的画）
         val windActive = !isIdle && !timer.inBreak &&
             focusFrac >= 0.5f && timer.phase != AppViewModel.TimerPhase.PAUSED
         Box {
@@ -166,9 +199,8 @@ private fun BoxScope.TimerRingSection(
                 progress = paintingP,
                 timeText = formatClock(displayMillis),
                 modeLabel = modeLabel,
-                modifier = Modifier
-                    .fillMaxHeight(0.94f)
-                    .fillMaxWidth(),
+                // 方案 B：画作左右铺满，纵向也吃满 weight 区（原先 0.94 的留白会削弱放大效果）
+                modifier = Modifier.fillMaxSize(),
                 completed = paintingCompleted,
                 windActive = windActive,
                 ghost = isIdle,
@@ -188,7 +220,15 @@ private fun BoxScope.TimerRingSection(
                 else -> 1f - timer.progress
             },
             timeText = formatClock(displayMillis),
-            modifier = Modifier.fillMaxHeight(0.94f),
+            // 夜航的翻牌时钟要数值（不是格式化字符串）：秒级驱动，跳秒才精确到哪一位翻
+            timeSeconds = clockSeconds,
+            flipAnimate = !reducedMotion,
+            // 🔴 必须给正方形容器：原来 fillMaxHeight(0.94f) + RingTimer 内部 aspectRatio(1f)
+            //    的组合里，fillMaxHeight 先锁死高度（0.94×列高 ≈ 658dp），aspectRatio 被
+            //    宽度约束钳制后放弃 → Box 变成 361×658 的长方形，Canvas 的 drawArc 画出
+            //    **椭圆环**、翻牌卡片也偏离环心（2026-10-24 网格测量实测）。
+            //    改成"宽定高"：环 = 0.92×屏宽 的正圆。
+            modifier = Modifier.fillMaxWidth(0.92f).aspectRatio(1f),
             dimmed = timer.phase == AppViewModel.TimerPhase.PAUSED,
             centerContent = if (!isIdle) {
                 {
@@ -239,6 +279,7 @@ fun TimerScreen(
     val task = tasks.firstOrNull { it.id == selectedTaskId }
     val isIdle = phase == AppViewModel.TimerPhase.IDLE
     val reducedMotion = rememberReducedMotion()
+    val isWatercolor = ActivePalette.mode == ThemeMode.WATERCOLOR
     val ambient = rememberAmbientParticlesState()
     // 「芦苇河」显影进度在番茄休息段冻结（休息不算专注，画不生长）
     val frozenPaintingP = remember { mutableFloatStateOf(0f) }
@@ -271,6 +312,138 @@ fun TimerScreen(
         onDispose { localView.keepScreenOn = false }
     }
 
+    // 底部操作区只有一份：水彩主题把它叠在画作底部（画作延伸到按钮下方），
+    // 其他主题仍按原布局排在圆环下方。
+    val actions: @Composable () -> Unit = {
+        if (isIdle) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Dimens.ScreenPadding),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Button(
+                    onClick = {
+                        localView.hapticConfirm()
+                        viewModel.startFocus()
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(Dimens.ButtonHeightHero)
+                        .pressScale(onPressChange = { controlPressed = it }),
+                    shape = ActivePalette.buttonShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = Primary),
+                ) {
+                    Text("开始专注", fontSize = 16.sp, fontWeight = FontWeight.Light)
+                }
+                // 时长按钮：待机时点它即可选倒计时时长（番茄则看结构说明）
+                if (mode != AppViewModel.TimerMode.COUNT_UP) {
+                    OutlinedButton(
+                        onClick = {
+                            if (mode == AppViewModel.TimerMode.POMODORO) {
+                                showPomodoroSheet = true
+                            } else {
+                                // 弹层从当前已选时长起步：按钮上显示 30min，弹层里也该是 30min。
+                                // 之前固定回 45min，按钮和弹层对不上，看着像两套数据。
+                                pickerMinutes = selectedDuration
+                                showDurationPicker = true
+                            }
+                        },
+                        modifier = Modifier
+                            .height(Dimens.ButtonHeightHero)
+                            // 描边按钮不投阴影：Material 3 里只有填充/悬浮按钮带高度；
+                            // 而且 softShadow 投在透明底的元素上时，阴影轮廓会退化成矩形，
+                            // 隔着透明底看就是按钮里的一块方角色斑（已实测复现）。
+                            .pressScale(),
+                        shape = ActivePalette.buttonShape,
+                        border = BorderStroke(1.dp, BorderColor),
+                    ) {
+                        Text(
+                            text = if (mode == AppViewModel.TimerMode.POMODORO) {
+                                "${settings.pomodoroFocusMinutes}+${settings.pomodoroBreakMinutes}min"
+                            } else {
+                                durationLabel(selectedDuration)
+                            },
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Light,
+                            color = Primary,
+                        )
+                    }
+                }
+            }
+        } else {
+            // 运行态操作区（2026-10-17 23:45 按"只要不是圆的"重做）：
+            // 底部一排两个**等宽矩形按钮**（沿用主题的 buttonShape）—— 暂停/继续 + 结束并记录；
+            // 取消降为下方小字。环上不再叠任何圆形浮动按钮（那颗 88dp 圆会压住环）。
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = Dimens.ScreenPadding),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Button(
+                    onClick = {
+                        localView.hapticTick()
+                        if (phase == AppViewModel.TimerPhase.RUNNING) viewModel.pauseFocus()
+                        else viewModel.resumeFocus()
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(Dimens.ButtonHeight)
+                        .pressScale(onPressChange = { controlPressed = it }),
+                    shape = ActivePalette.buttonShape,
+                    colors = ButtonDefaults.buttonColors(containerColor = Primary),
+                ) {
+                    Text(
+                        text = if (phase == AppViewModel.TimerPhase.RUNNING) "暂停" else "继续",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Light,
+                    )
+                }
+                OutlinedButton(
+                    onClick = {
+                        localView.hapticConfirm()
+                        viewModel.finishEarly()
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(Dimens.ButtonHeight)
+                        .pressScale(),
+                    shape = ActivePalette.buttonShape,
+                    border = BorderStroke(1.dp, BorderColor),
+                ) {
+                    Text(
+                        text = when (mode) {
+                            AppViewModel.TimerMode.COUNT_UP -> "完成"
+                            AppViewModel.TimerMode.POMODORO -> "结束本轮"
+                            AppViewModel.TimerMode.COUNT_DOWN -> "结束并记录"
+                        },
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Primary,
+                    )
+                }
+            }
+            TextButton(
+                onClick = {
+                    localView.hapticTick()
+                    showCancelConfirm = true
+                },
+                // 13sp 是"注释级"字号，和上面 15sp 的按钮并排会觉得像小字附注；
+                // 抬到 14sp Medium，并把触控高度补到 48dp（TextButton 默认只有 40dp）
+                modifier = Modifier.heightIn(min = 48.dp),
+            ) {
+                Text(
+                    text = "取消本轮",
+                    color = ErrorRed,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+        }
+    }
+
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.TopCenter,
@@ -296,11 +469,13 @@ fun TimerScreen(
                 intensity = if (urgent) 1.6f else 1f,
             )
         }
+        // 水彩画作用「铺满屏宽」方案：Column 不再统一加左右边距，
+        // 任务卡/按钮各自保留 ScreenPadding；中间 weight 画布区直接通到屏幕两侧。
+        // 其他主题的环仍按 ringMaxSize 居中，不受影响。
         Column(
             modifier = Modifier
                 .widthIn(max = Dimens.ContentMaxWidth)
-                .fillMaxSize()
-                .padding(horizontal = Dimens.ScreenPadding),
+                .fillMaxSize(),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.height(14.dp))
@@ -313,6 +488,7 @@ fun TimerScreen(
                 ProCard(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .padding(horizontal = Dimens.ScreenPadding)
                         .pressScale()
                         .clickable { showTaskPicker = true },
                 ) {
@@ -366,9 +542,15 @@ fun TimerScreen(
             } else {
                 // 运行态：任务条放到最上方（与待机页位置一致），半透明弱化，
                 // 并且不再显示「已专注 X」——时长看圆环就够，两处重复反而吵。
+                // 🔴 水彩下必须不透明：画作从下方透上来，62% 的卡会让任务名糊在画里（他报的"挡住任务"）
+                // 🔴 再压 zIndex：画作在 Column 里排在本卡之后 → 后绘制 = 盖在上面。
+                //    画作只要溢出 1px 到本卡区域，卡就被压住；zIndex 把顺序钉死。
                 ProCard(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = SurfaceCard.copy(alpha = 0.62f),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = Dimens.ScreenPadding)
+                        .zIndex(2f),
+                    color = if (isWatercolor) SurfaceCard else SurfaceCard.copy(alpha = 0.62f),
                 ) {
                     Row(
                         modifier = Modifier.padding(Dimens.CardPadding),
@@ -413,16 +595,16 @@ fun TimerScreen(
             }
             Spacer(Modifier.height(if (isIdle) 12.dp else 16.dp))
 
-            // 圆环区吃掉剩余高度：小屏自动缩小，按钮始终在底部可见（无需滚动）
-            // 水彩主题是竖幅画（芦苇河 934×1685，宽高比 0.55），
-            // 若沿用 ringMaxSize 的横向口径卡高度，min(W/934, H/1685) 会以高度为瓶颈，
-            // 画作只占画布宽 ~44%、两侧各留白 ~110dp —— 竖幅画必须吃满纵向空间。
+            // 画布区吃掉剩余高度。水彩主题把操作按钮叠在画作底部，
+            // 画作继续延伸到按钮下方；其他主题的环仍按 ringMaxSize 居中，按钮在环下方。
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
+                    // 画作/纸纹层是 fillMaxSize 的，任何溢出绘制都不许爬到上方任务卡区域
+                    .clipToBounds()
                     .then(
-                        if (ActivePalette.mode == ThemeMode.WATERCOLOR) {
+                        if (isWatercolor) {
                             Modifier
                         } else {
                             Modifier.heightIn(max = ringMaxSize + 40.dp)
@@ -439,140 +621,53 @@ fun TimerScreen(
                     reducedMotion = reducedMotion,
                     frozenPaintingP = frozenPaintingP,
                     controlPressed = controlPressed,
+                    nowMillis = viewModel::currentDisplayMillis,
                 )
-            }
 
-            Spacer(Modifier.height(if (isIdle) 18.dp else 36.dp))
-
-            if (isIdle) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Button(
-                        onClick = {
-                            localView.hapticConfirm()
-                            viewModel.startFocus()
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(Dimens.ButtonHeightHero)
-                            .pressScale(onPressChange = { controlPressed = it }),
-                        shape = ActivePalette.buttonShape,
-                        colors = ButtonDefaults.buttonColors(containerColor = Primary),
-                    ) {
-                        Text("开始专注", fontSize = 16.sp, fontWeight = FontWeight.Light)
-                    }
-                    // 时长按钮：待机时点它即可选倒计时时长（番茄则看结构说明）
-                    if (mode != AppViewModel.TimerMode.COUNT_UP) {
-                        OutlinedButton(
-                            onClick = {
-                                if (mode == AppViewModel.TimerMode.POMODORO) {
-                                    showPomodoroSheet = true
-                                } else {
-                                    // 弹层从当前已选时长起步：按钮上显示 30min，弹层里也该是 30min。
-                                    // 之前固定回 45min，按钮和弹层对不上，看着像两套数据。
-                                    pickerMinutes = selectedDuration
-                                    showDurationPicker = true
-                                }
-                            },
-                            modifier = Modifier
-                                .height(Dimens.ButtonHeightHero)
-                                // 描边按钮不投阴影：Material 3 里只有填充/悬浮按钮带高度；
-                                // 而且 softShadow 投在透明底的元素上时，阴影轮廓会退化成矩形，
-                                // 隔着透明底看就是按钮里的一块方角色斑（已实测复现）。
-                                .pressScale(),
-                            shape = ActivePalette.buttonShape,
-                            border = BorderStroke(1.dp, BorderColor),
-                        ) {
-                            Text(
-                                text = if (mode == AppViewModel.TimerMode.POMODORO) {
-                                    "${settings.pomodoroFocusMinutes}+${settings.pomodoroBreakMinutes}min"
-                                } else {
-                                    durationLabel(selectedDuration)
-                                },
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Light,
-                                color = Primary,
-                            )
-                        }
-                    }
-                }
-            } else {
-                // 运行态操作区（2026-10-17 23:45 按"只要不是圆的"重做）：
-                // 底部一排两个**等宽矩形按钮**（沿用主题的 buttonShape）—— 暂停/继续 + 结束并记录；
-                // 取消降为下方小字。环上不再叠任何圆形浮动按钮（那颗 88dp 圆会压住环）。
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(
-                        onClick = {
-                            localView.hapticTick()
-                            if (phase == AppViewModel.TimerPhase.RUNNING) viewModel.pauseFocus()
-                            else viewModel.resumeFocus()
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(Dimens.ButtonHeight)
-                            .pressScale(onPressChange = { controlPressed = it }),
-                        shape = ActivePalette.buttonShape,
-                        colors = ButtonDefaults.buttonColors(containerColor = Primary),
-                    ) {
-                        Text(
-                            text = if (phase == AppViewModel.TimerPhase.RUNNING) "暂停" else "继续",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Light,
-                        )
-                    }
-                    OutlinedButton(
-                        onClick = {
-                            localView.hapticConfirm()
-                            viewModel.finishEarly()
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(Dimens.ButtonHeight)
-                            .pressScale(),
-                        shape = ActivePalette.buttonShape,
-                        border = BorderStroke(1.dp, BorderColor),
-                    ) {
-                        Text(
-                            text = when (mode) {
-                                AppViewModel.TimerMode.COUNT_UP -> "完成"
-                                AppViewModel.TimerMode.POMODORO -> "结束本轮"
-                                AppViewModel.TimerMode.COUNT_DOWN -> "结束并记录"
-                            },
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Primary,
-                        )
-                    }
-                }
-                TextButton(
-                    onClick = {
-                        localView.hapticTick()
-                        showCancelConfirm = true
-                    },
-                    // 13sp 是"注释级"字号，和上面 15sp 的按钮并排会觉得像小字附注；
-                    // 抬到 14sp Medium，并把触控高度补到 48dp（TextButton 默认只有 40dp）
-                    modifier = Modifier.heightIn(min = 48.dp),
-                ) {
-                    Text(
-                        text = "取消本轮",
-                        color = ErrorRed,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
+                if (isWatercolor) {
+                    // 操作区浮在画作底部：加一层从透明到纸色的轻渐隐，保证
+                    // 暂停/继续、结束记录和取消文字在芦苇河上仍然清晰。
+                    Box(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .height(220.dp)
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Transparent,
+                                        BgPrimary.copy(alpha = 0.55f),
+                                    ),
+                                ),
+                            ),
                     )
+                    Column(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        actions()
+                    }
                 }
             }
-            Spacer(Modifier.height(Dimens.ListBottomGap))
+
+            if (!isWatercolor) {
+                Spacer(Modifier.height(if (isIdle) 18.dp else 36.dp))
+                actions()
+                Spacer(Modifier.height(Dimens.ListBottomGap))
+            }
         }
 
         // 补录撤销条：贴在底栏上方（补错了不用跑去记录页删）
+        // 只停留 1 秒——补录是“告知”不是“反悔”，写错了回收站也能找回
         RecordUndoBar(
             visible = lastAdded != null,
             message = "已补录 ${formatMinutesHm(lastAdded?.minutes ?: 0)}",
+            seconds = 1,
             onUndo = {
-                lastAdded?.let { viewModel.deleteRecord(it.id) }
+                lastAdded?.let { viewModel.deleteRecord(it) }
                 viewModel.clearLastAddedRecord()
             },
             onExpire = { viewModel.clearLastAddedRecord() },

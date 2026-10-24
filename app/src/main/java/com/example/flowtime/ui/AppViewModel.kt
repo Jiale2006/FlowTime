@@ -1,17 +1,23 @@
 package com.example.flowtime.ui
 
 import android.app.Application
+import android.content.Context
 import android.widget.Toast
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.RingtoneManager
 import android.net.Uri
+import android.os.Build
 import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.flowtime.service.FocusCompleteNotifier
 import com.example.flowtime.service.FocusReminder
 import com.example.flowtime.service.FocusTimerService
 import com.example.flowtime.data.AppSettings
@@ -25,6 +31,10 @@ import com.example.flowtime.data.RecordLink
 import com.example.flowtime.data.RecordSource
 import com.example.flowtime.data.StatsRange
 import com.example.flowtime.data.StatsRules
+import com.example.flowtime.data.TimerSnapshot
+import com.example.flowtime.data.TimerSnapshotStore
+import com.example.flowtime.data.TrashedRecord
+import com.example.flowtime.data.TrashedTask
 import com.example.flowtime.ui.theme.ThemeMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -50,6 +60,10 @@ import java.time.temporal.ChronoUnit
 class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = FlowTimeRepository(app)
+    private val timerStore = TimerSnapshotStore(app)
+
+    /** 进程被杀前留下的计时快照；同步读，第一帧就能显示恢复后的状态 */
+    private val restoredTimer: TimerSnapshot? = timerStore.load()
 
     val tasks: StateFlow<List<FocusTask>> =
         repo.tasks.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -57,6 +71,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         repo.records.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val settings: StateFlow<AppSettings> =
         repo.settings.stateIn(viewModelScope, SharingStarted.Eagerly, AppSettings())
+
+    /**
+     * 回收站内容（30 天内删除的记录）。
+     * 声明在这里而不是文件下半部分：`init` 里要读它，晚了会 NPE（见下面 _statsRange 的注释）。
+     */
+    private val _trash = MutableStateFlow<List<TrashedRecord>>(emptyList())
+    val trash: StateFlow<List<TrashedRecord>> = _trash.asStateFlow()
+
+    /**
+     * 回收站里的**已删除任务**（墓碑，30 天）。
+     * 它名下的记录也被一起摘走了，所以**不参与统计**——只服务回收站界面。
+     */
+    private val _trashTasks = MutableStateFlow<List<TrashedTask>>(emptyList())
+    val trashTasks: StateFlow<List<TrashedTask>> = _trashTasks.asStateFlow()
 
     // ---- 界面主题 ----
 
@@ -112,23 +140,48 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
     }
 
-    private val _timer = MutableStateFlow(TimerState())
+    private val _timer = MutableStateFlow(restoredTimer?.toTimerState() ?: TimerState())
     val timer: StateFlow<TimerState> = _timer.asStateFlow()
+
+    private fun TimerSnapshot.toTimerState(): TimerState = TimerState(
+        // 重新进入一律先停在暂停态：让用户看到保留的时间，自己点「继续」后才开始走。
+        // 快照里原本是 RUNNING 也不直接跑（用户明确要求）。
+        phase = TimerPhase.PAUSED,
+        mode = runCatching { TimerMode.valueOf(mode) }.getOrDefault(TimerMode.COUNT_DOWN),
+        inBreak = inBreak,
+        round = round.coerceAtLeast(1),
+        selectedTaskId = selectedTaskId,
+        totalMillis = totalMillis.coerceAtLeast(0L),
+        elapsedMillis = elapsedMillis.coerceAtLeast(0L),
+    )
 
     /** 完成事件：非空时 UI 跳转完成页 */
     private val _completedRecord = MutableStateFlow<FocusRecord?>(null)
     val completedRecord: StateFlow<FocusRecord?> = _completedRecord.asStateFlow()
 
     /** 首页开始专注时选择的时长（分钟），倒计时使用；正计时/番茄忽略 */
-    private val _selectedDurationMinutes = MutableStateFlow(DEFAULT_DURATION_MINUTES)
+    private val _selectedDurationMinutes = MutableStateFlow(
+        restoredTimer
+            ?.takeIf { it.mode == TimerMode.COUNT_DOWN.name }
+            ?.selectedDurationMinutes
+            ?.takeIf { it > 0 }
+            ?: DEFAULT_DURATION_MINUTES
+    )
     val selectedDurationMinutes: StateFlow<Int> = _selectedDurationMinutes.asStateFlow()
 
     private var ticker: Job? = null
 
+    /** 主 ticker 最近一次采样的 realtime；UI 用它把翻页对齐到真实秒边界 */
+    @Volatile
+    private var lastTickRealtime = 0L
+
     private var taskSelectionInitialized = false
 
     /** 用户在首页手动选过时长后，不再被设置里的「默认时长」覆盖 */
-    private var userPickedDuration = false
+    private var userPickedDuration =
+        restoredTimer?.let {
+            it.mode == TimerMode.COUNT_DOWN.name && it.selectedDurationMinutes > 0
+        } == true
 
     /**
      * 统计页范围（本周/本月/全部）。
@@ -138,6 +191,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val _statsRange = MutableStateFlow(StatsRange.WEEK)
 
     init {
+        // 回收站：冷启动读一次，设置页的条数与回收站页都靠它
+        refreshTrash()
         // 旧版本写死过的 25 分钟默认值升级为 45 分钟（一次）
         viewModelScope.launch { repo.migrateDefaultDurationIfNeeded() }
         // 旧版 JSON 数据（任务/记录/独立大类表）一次性导入 Room，幂等
@@ -197,9 +252,19 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         }
                     }
                 }
-                // 选中任务被删除时回退为自由专注（不自动绑其他任务）
-                if (state.selectedTaskId != null && list.none { it.id == state.selectedTaskId }) {
-                    _timer.update { it.copy(selectedTaskId = null, elapsedMillis = 0L) }
+                // 选中任务被删除时回退为自由专注（不自动绑其他任务）。
+                // list 为空多半是 Room 还没加载完，先不动——否则恢复出来的 taskId 会在首帧被清掉。
+                // 进行中/暂停的计时不能因为任务没了就抹掉进度，只有待机态才把 elapsed 归零。
+                if (list.isNotEmpty() && state.selectedTaskId != null &&
+                    list.none { it.id == state.selectedTaskId }
+                ) {
+                    _timer.update {
+                        it.copy(
+                            selectedTaskId = null,
+                            elapsedMillis = if (it.phase == TimerPhase.IDLE) 0L else it.elapsedMillis,
+                        )
+                    }
+                    persistTimer()
                 }
             }
         }
@@ -207,6 +272,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             timer.collect { state ->
                 FocusTimerBus.snapshot.value = buildSnapshot(state)
+            }
+        }
+        // 任务列表晚于计时状态加载（或任务改名）时也要刷新通知里的任务名，
+        // 否则恢复出来的暂停态会一直显示「自由专注」
+        viewModelScope.launch {
+            tasks.collect {
+                FocusTimerBus.snapshot.value = buildSnapshot(_timer.value)
             }
         }
         // 通知按钮命令回传执行
@@ -218,6 +290,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     FocusTimerBus.Command.STOP -> cancelFocus()
                 }
             }
+        }
+        // 上次被划掉/杀进程时仍在计时或暂停：恢复成暂停态，等用户点「继续」（离开期间不计时）。
+        // 先把快照推给服务再启动它，否则服务会先读到默认的 inactive 快照并自我停止。
+        if (_timer.value.phase != TimerPhase.IDLE) {
+            persistTimer()
+            FocusTimerBus.snapshot.value = buildSnapshot(_timer.value)
+            startTicker()
+            syncService(true)
         }
     }
 
@@ -239,12 +319,41 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             else -> "倒计时"
         }
         val prefix = if (state.mode == TimerMode.COUNT_UP) "已计时" else "剩余"
+        // 正计时没有终点，通知里不画进度条
+        val progressPercent = if (state.mode == TimerMode.COUNT_UP || state.totalMillis <= 0L) {
+            -1
+        } else {
+            ((state.elapsedMillis * 100) / state.totalMillis).toInt().coerceIn(0, 100)
+        }
+        val roundText = if (state.mode == TimerMode.POMODORO) {
+            val total = pomodoroRoundsPerCycle()
+            // 第 5 轮配 4 轮一循环 → 显示成 1/4（长休息后重新计数）
+            val inCycle = ((state.round - 1) % total) + 1
+            if (state.inBreak) "第 $inCycle/$total 轮后休息" else "第 $inCycle/$total 轮"
+        } else {
+            ""
+        }
+        // 系统 Chronometer 基准：正计时 = 起点，倒计时/番茄 = 终点（往后加剩余时长）。
+        // 暂停时必须归 0 —— 否则系统会按墙钟继续走，通知里的时间会自己往前跑。
+        val running = active && state.phase == TimerPhase.RUNNING
+        val nowWall = System.currentTimeMillis()
+        val chronometerBase = when {
+            !running -> 0L
+            state.mode == TimerMode.COUNT_UP -> nowWall - state.elapsedMillis
+            else -> nowWall + state.remainingMillis
+        }
         return FocusTimerBus.Snapshot(
             active = active,
             paused = state.phase == TimerPhase.PAUSED,
             taskName = taskName,
-            displayText = if (active) "$prefix $clock" else "",
+            // 运行时时间交给系统 Chronometer 走，这里留空 —— 否则 displayText 每 100ms
+            // 变一次，Snapshot 的去重失效，通知被无意义地高频刷新（还更容易被系统节流）
+            displayText = if (active && !running) "$prefix $clock" else "",
             modeLabel = modeLabel,
+            progressPercent = progressPercent,
+            roundText = roundText,
+            chronometerBase = chronometerBase,
+            chronometerCountDown = running && state.mode != TimerMode.COUNT_UP,
         )
     }
 
@@ -333,6 +442,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             selectedTaskId = currentTask()?.id,
             totalMillis = total,
         )
+        FocusCompleteNotifier.cancel(getApplication<Application>())
+        persistTimer()
         syncService(true)
         startTicker()
     }
@@ -340,12 +451,38 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun pauseFocus() {
         if (_timer.value.phase == TimerPhase.RUNNING) {
             _timer.update { it.copy(phase = TimerPhase.PAUSED) }
+            persistTimer()
         }
     }
 
     fun resumeFocus() {
         if (_timer.value.phase == TimerPhase.PAUSED) {
             _timer.update { it.copy(phase = TimerPhase.RUNNING) }
+            persistTimer()
+        }
+    }
+
+    /**
+     * 当前显示时间的精确值（含两次 10Hz 采样之间的外推）。
+     * 只读，不参与计时核心；翻牌时钟用它把跳秒对齐到真实秒边界，
+     * 避免 10Hz ticker 的 0–100ms 相位让每次翻页起手忽早忽晚。
+     */
+    fun currentDisplayMillis(): Long {
+        val state = _timer.value
+        val delta = if (lastTickRealtime > 0L) {
+            (SystemClock.elapsedRealtime() - lastTickRealtime).coerceAtLeast(0L)
+        } else {
+            0L
+        }
+        val elapsed = if (state.phase == TimerPhase.RUNNING) {
+            state.elapsedMillis + delta
+        } else {
+            state.elapsedMillis
+        }
+        return if (state.mode == TimerMode.COUNT_UP) {
+            elapsed
+        } else {
+            (state.totalMillis - elapsed).coerceAtLeast(0L)
         }
     }
 
@@ -389,17 +526,53 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         syncService(false)
+        timerStore.clear()
+    }
+
+    /**
+     * 页面销毁（含划掉最近任务）时再落一次最新进度。
+     * 这是比每秒 checkpoint 更贴近「划掉处」的保存点；进程被直接杀掉时靠 checkpoint 兜底。
+     */
+    override fun onCleared() {
+        persistTimer()
+        // VM 没了 ticker 也就停了，通知再留着只会显示一个不再变化的旧时间
+        syncService(false)
+        super.onCleared()
+    }
+
+    /** 当前计时状态落盘；待机态清掉快照 */
+    private fun persistTimer() {
+        val state = _timer.value
+        if (state.phase == TimerPhase.IDLE) {
+            timerStore.clear()
+            return
+        }
+        timerStore.save(
+            TimerSnapshot(
+                phase = state.phase.name,
+                mode = state.mode.name,
+                inBreak = state.inBreak,
+                round = state.round,
+                selectedTaskId = state.selectedTaskId,
+                totalMillis = state.totalMillis,
+                elapsedMillis = state.elapsedMillis,
+                selectedDurationMinutes = _selectedDurationMinutes.value,
+            ),
+        )
     }
 
     private fun startTicker() {
         ticker?.cancel()
+        lastTickRealtime = SystemClock.elapsedRealtime()
         ticker = viewModelScope.launch {
-            var lastTick = SystemClock.elapsedRealtime()
+            var lastTick = lastTickRealtime
+            var lastCheckpoint = lastTick
             while (isActive) {
                 delay(100)
                 val now = SystemClock.elapsedRealtime()
                 val delta = now - lastTick
                 lastTick = now
+                lastTickRealtime = now
                 val state = _timer.value
                 if (state.phase != TimerPhase.RUNNING) continue
                 val newElapsed = state.elapsedMillis + delta
@@ -425,6 +598,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                         elapsedMillis = 0L,
                                     )
                                 }
+                                // 自动续上下一轮：上一条「专注完成」通知该退场了
+                                FocusCompleteNotifier.cancel(getApplication<Application>())
+                                persistTimer()
                             } else {
                                 resetToIdle()
                                 break
@@ -440,36 +616,68 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                             // 番茄：本段入库+响铃后自动进入休息段，不打断循环
                             saveSegment(state.selectedTaskId, minutes)
                             if (settings.value.ringtoneEnabled) playRingtone()
+                            vibrateCompletion()
                             // 轮数达到设定值给长休息，否则短休息
-                            val needLongBreak = state.round % pomodoroRoundsPerCycle() == 0
+                            val totalRounds = pomodoroRoundsPerCycle()
+                            val needLongBreak = state.round % totalRounds == 0
+                            val breakMillis = if (needLongBreak) {
+                                pomodoroLongBreakMillis()
+                            } else {
+                                pomodoroBreakMillis()
+                            }
+                            FocusCompleteNotifier.notifyPomodoroComplete(
+                                context = getApplication<Application>(),
+                                taskName = taskNameOf(state.selectedTaskId),
+                                focusMinutes = minutes,
+                                round = ((state.round - 1) % totalRounds) + 1,
+                                totalRounds = totalRounds,
+                                breakMinutes = (breakMillis / 60_000L).toInt(),
+                                longBreak = needLongBreak,
+                            )
                             _timer.update {
                                 it.copy(
                                     inBreak = true,
-                                    totalMillis = if (needLongBreak) {
-                                        pomodoroLongBreakMillis()
-                                    } else {
-                                        pomodoroBreakMillis()
-                                    },
+                                    totalMillis = breakMillis,
                                     elapsedMillis = 0L,
                                 )
                             }
+                            // 段切换必须立即落盘：否则恢复时会按旧段再结算一次，产生重复记录
+                            persistTimer()
                         } else {
                             resetToIdle()
-                            completeRecord(state.selectedTaskId, minutes)
+                            completeRecord(state.selectedTaskId, minutes, naturalFinish = true)
                             break
                         }
                     }
                     else -> _timer.update { it.copy(elapsedMillis = newElapsed) }
                 }
+                // 运行中每秒落一次盘：被划掉/杀进程时最多丢 1 秒进度
+                if (now - lastCheckpoint >= TIMER_CHECKPOINT_INTERVAL_MILLIS) {
+                    lastCheckpoint = now
+                    persistTimer()
+                }
             }
         }
     }
 
-    /** 本次计时完成：入库 + 响铃 + 进完成页 */
-    private fun completeRecord(taskId: String?, minutes: Int) {
+    /**
+     * 本次计时完成：入库 + 响铃 + 进完成页。
+     *
+     * naturalFinish 只在"自己走到 0"时为 true：手动提前完成、正计时 12 小时兜底
+     * 都不该再震一下或发完成通知。
+     */
+    private fun completeRecord(taskId: String?, minutes: Int, naturalFinish: Boolean = false) {
         val record = newRecord(taskId, minutes)
         viewModelScope.launch { repo.addRecord(record) }
         if (settings.value.ringtoneEnabled) playRingtone()
+        if (naturalFinish) {
+            vibrateCompletion()
+            FocusCompleteNotifier.notifyCountdownComplete(
+                context = getApplication<Application>(),
+                taskName = record.taskName,
+                minutes = minutes,
+            )
+        }
         _completedRecord.value = record
     }
 
@@ -513,6 +721,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * 自然到点轻震一下。80ms / 约七成力度，不跟「完成提示音」开关联动——
+     * 用户关掉铃声通常只是不想出声，触觉反馈仍然保留。
+     *
+     * 早先试过 45ms、四成力度，真机上（带壳、低振幅马达）完全无感；
+     * 80ms 仍是短促一击，但过了马达的起振阈值。
+     */
+    private fun vibrateCompletion() {
+        val app = getApplication<Application>()
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (app.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)
+                ?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            app.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        }
+        if (vibrator?.hasVibrator() != true) {
+            Log.w("AppViewModel", "vibrateCompletion skipped: no vibrator")
+            return
+        }
+        runCatching { vibrator.vibrate(VibrationEffect.createOneShot(80L, 180)) }
+            .onFailure { Log.w("AppViewModel", "vibrateCompletion failed: ${it.message}") }
+    }
+
     companion object {
         /** 倒计时默认时长（分钟）：45 分钟，不合适可在首页点「倒计时」随时重选 */
         const val DEFAULT_DURATION_MINUTES = 45
@@ -524,6 +756,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         private const val COUNT_UP_RING_PERIOD_MILLIS = 30 * 60_000L
         /** 正计时自动结算兜底：超过 12 小时自动保存并回待机 */
         private const val COUNT_UP_AUTO_FINISH_MILLIS = 12 * 60 * 60_000L
+        /** 运行中快照落盘间隔：哪怕进程被直接杀掉，恢复时最多丢 1 秒 */
+        private const val TIMER_CHECKPOINT_INTERVAL_MILLIS = 1_000L
         /** 月份热力图最多回看几个月（再早的记录也能翻到，但页数收敛） */
         private const val HEAT_MONTH_LIMIT = 12
         /** 「最强一天」取前几名（全量口径的成就类数据） */
@@ -588,14 +822,90 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _lastAddedRecord.value = null
     }
 
-    /** 删除一条记录（撤销时用 [restoreRecord] 原样插回） */
-    fun deleteRecord(id: Long) {
-        viewModelScope.launch { repo.deleteRecord(id) }
+    /**
+     * 删除一条记录：先进回收站再删库（[restoreRecord] 可原样取回）。
+     *
+     * 传整条而不是 id，是因为回收站要存记录本体 —— 只给 id 的话到了那一刻已经查不到了。
+     */
+    fun deleteRecord(record: FocusRecord) {
+        viewModelScope.launch {
+            repo.deleteRecord(record)
+            refreshTrashNow()
+        }
     }
 
-    /** 撤销删除：带着原 id 插回，位置与内容都不变 */
+    /** 撤销删除 / 从回收站恢复：带着原 id 插回，位置与内容都不变 */
     fun restoreRecord(record: FocusRecord) {
-        viewModelScope.launch { repo.addRecord(record) }
+        viewModelScope.launch {
+            repo.restoreRecord(record)
+            refreshTrashNow()
+        }
+    }
+
+    /** 清空回收站（不可逆，调用方负责二次确认） */
+    fun purgeTrash() {
+        viewModelScope.launch {
+            repo.purgeTrash()
+            _trash.value = emptyList()
+            _trashTasks.value = emptyList()
+        }
+    }
+
+    /** 从回收站恢复任务（连同它的子任务）：记录因 taskId 未断，自动归位 */
+    fun restoreTask(rootId: String) {
+        viewModelScope.launch {
+            repo.restoreTask(rootId)
+            refreshTrashNow()
+        }
+    }
+
+    /** 永久删除一条回收站记录（不可逆，界面负责确认） */
+    fun purgeRecord(recordId: Long) {
+        viewModelScope.launch {
+            repo.purgeRecord(recordId)
+            refreshTrashNow()
+        }
+    }
+
+    /**
+     * 回收站**批量**恢复（多选）：记录 + 任务一次做完再刷一次列表。
+     * 逐条调用会触发 N 次 recompute + N 次文件读写，列表会抖。
+     */
+    fun restoreTrashItems(records: List<FocusRecord>, taskRootIds: List<String>) {
+        if (records.isEmpty() && taskRootIds.isEmpty()) return
+        viewModelScope.launch {
+            records.forEach { repo.restoreRecord(it) }
+            taskRootIds.forEach { repo.restoreTask(it) }
+            refreshTrashNow()
+        }
+    }
+
+    /** 回收站**批量**永久删除（多选）：任务名下的记录放生回「未分类」，时长不丢 */
+    fun purgeTrashItems(recordIds: List<Long>, taskRootIds: List<String>) {
+        if (recordIds.isEmpty() && taskRootIds.isEmpty()) return
+        viewModelScope.launch {
+            recordIds.forEach { repo.purgeRecord(it) }
+            taskRootIds.forEach { repo.purgeTask(it) }
+            refreshTrashNow()
+        }
+    }
+
+    /** 永久删除一个任务：名下记录解绑保留（历史时长一分不少，只是不再挂任务） */
+    fun purgeTask(rootId: String) {
+        viewModelScope.launch {
+            repo.purgeTask(rootId)
+            refreshTrashNow()
+        }
+    }
+
+    /** 重新读回收站（进回收站页 / 设置页回前台时调） */
+    fun refreshTrash() {
+        viewModelScope.launch { refreshTrashNow() }
+    }
+
+    private suspend fun refreshTrashNow() {
+        _trashTasks.value = repo.trashedTasks()
+        _trash.value = repo.trashedRecords()
     }
 
     /**
@@ -876,8 +1186,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val dailyDays: List<DayMinutes> = emptyList(),
         /** 可左右滑动的月份热力图，由早到晚（最后一页 = 当月） */
         val heatMonths: List<HeatMonth> = emptyList(),
-        val taskTotals: List<TaskTotal> = emptyList(),
-        val categoryTotals: List<CategoryTotal> = emptyList(),
         /** 上一个同长度区间的累计分钟（本周→上周 / 本月→上月）；「全部」档为 null */
         val previousMinutes: Int? = null,
         val previousLabel: String? = null,
@@ -896,15 +1204,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { repo.updateSettings(settings.value.copy(statsRange = range.name)) }
     }
 
-    /** 范围统计：记录/任务/范围任一变化时重算一次（O(n)），UI 只订阅结果 */
+    /**
+     * 范围统计：记录 / 范围变化时重算一次（O(n)），UI 只订阅结果。
+     * 不再依赖任务表 —— 唯一用到任务的「任务分布」已经挪到 UI 层自己按天聚合。
+     */
     val rangeStats: StateFlow<RangeStats> =
-        combine(records, tasks, _statsRange) { recs, taskList, range ->
-            computeRangeStats(recs, taskList, range)
+        combine(records, _statsRange) { recs, range ->
+            computeRangeStats(recs, range)
         }.stateIn(viewModelScope, SharingStarted.Eagerly, RangeStats())
 
     private fun computeRangeStats(
         recs: List<FocusRecord>,
-        taskList: List<FocusTask>,
         range: StatsRange,
     ): RangeStats {
         val zone = ZoneId.systemDefault()
@@ -952,33 +1262,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             recs.filter { dayOf(it.endEpochMillis) in window }.sumOf { it.minutes }
         }
 
-        // 记录 → 归属：优先 taskId，旧记录按任务名找回
-        val index = RecordLink.TaskIndex.of(taskList)
-
-        // 范围内任务分布：按归属聚合（任务改名不断链），显示名用任务当前名字
-        val taskTotals = inScope
-            .groupBy { RecordLink.keyOf(it) }
-            .map { (key, list) ->
-                TaskTotal(index.byId[key]?.name ?: list.first().taskName, list.sumOf { it.minutes })
-            }
-            .sortedByDescending { it.minutes }
-
-        // 范围内分类分布（归属任务的父任务 → 大类；没有父任务的算「未分类」）
-        val categoryTotals = inScope
-            .groupBy { index.categoryIdOf(it) }
-            .map { (catId, list) ->
-                CategoryTotal(
-                    categoryId = catId,
-                    name = catId?.let { index.byId[it]?.name } ?: "未分类",
-                    minutes = list.sumOf { it.minutes },
-                    // 按归属键去重，避免同一任务改名后被算成两个任务
-                    taskCount = list.map { RecordLink.keyOf(it) }.distinct().size,
-                )
-            }
-            .sortedByDescending { it.minutes }
+        // 任务分布已挪到 UI 层（`StatsScreen.taskTotalsFor`）：那张卡有自己的
+        // 今天/本周/本月 chip 和"右滑看前一天"，跟本函数统管的页面范围不是一回事，
+        // 在这里算会被页面范围绑死。口径两边一致：归属不到活任务的一律归「自由专注」。
 
         val dailyDays = when (range) {
-            StatsRange.ALL -> emptyList()
+            // 全部档：起点 = 首条记录所在月的 **1 号**，终点今天，**每天一根柱（空白天也画底柱）**
+            // 不跳空白日：柱子之间要能看出时间间隔，跳着画会让人误以为两天相邻
+            StatsRange.ALL -> {
+                val firstDay = recs.minOfOrNull { dayOf(it.endEpochMillis) }
+                if (firstDay == null) {
+                    emptyList()
+                } else {
+                    val start = firstDay.withDayOfMonth(1)
+                    val span = ChronoUnit.DAYS.between(start, today).toInt() + 1
+                    (0 until span).map { offset ->
+                        val day = start.plusDays(offset.toLong())
+                        DayMinutes(dayLabel(day), scopeByDay[day] ?: 0, day == today)
+                    }
+                }
+            }
+
             StatsRange.WEEK -> (0..6).map { offset ->
                 val day = today.with(DayOfWeek.MONDAY).plusDays(offset.toLong())
                 DayMinutes(dayLabel(day), scopeByDay[day] ?: 0, day == today)
@@ -1005,8 +1309,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             hourMinutes = hourMinutes,
             dailyDays = dailyDays,
             heatMonths = heatMonths,
-            taskTotals = taskTotals,
-            categoryTotals = categoryTotals,
             previousMinutes = previousMinutes,
             previousLabel = when (range) {
                 StatsRange.WEEK -> "上周"
@@ -1117,9 +1419,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         return pages
     }
-
-    /** 大类聚合项（范围统计用）：含「未分类」，按分钟降序 */
-    data class CategoryTotal(val categoryId: String?, val name: String, val minutes: Int, val taskCount: Int)
 
     /** 任务聚合项（范围统计用），按时长降序 */
     data class TaskTotal(val name: String, val minutes: Int)

@@ -161,11 +161,21 @@ object BackupFormat {
     fun decodeRecords(raw: String): List<FocusRecord> =
         if (raw.isBlank()) emptyList() else recordsFromJson(JSONArray(raw))
 
-    fun recordsFromJson(array: JSONArray): List<FocusRecord> = List(array.length()) { i ->
-        val obj = array.getJSONObject(i)
+    fun recordsFromJson(array: JSONArray): List<FocusRecord> =
+        List(array.length()) { i -> recordFromJson(array.getJSONObject(i)) }
+
+    fun recordsToJson(list: List<FocusRecord>): JSONArray = JSONArray().apply {
+        list.forEach { put(recordToJson(it)) }
+    }
+
+    /**
+     * 单条记录的编解码：回收站（`TrashStore`）也用它。
+     * 字段清单仍只有这一份 —— 备份与回收站不会再各抄一遍。
+     */
+    fun recordFromJson(obj: JSONObject): FocusRecord {
         val minutes = obj.optInt("minutes", 0)
         val end = obj.optLong("endEpochMillis", 0L)
-        FocusRecord(
+        return FocusRecord(
             id = obj.optLong("id", 0L),
             taskId = obj.optNullableString("taskId"),
             taskName = obj.optString("taskName", ""),
@@ -178,20 +188,14 @@ object BackupFormat {
         )
     }
 
-    fun recordsToJson(list: List<FocusRecord>): JSONArray = JSONArray().apply {
-        list.forEach { record ->
-            put(
-                JSONObject()
-                    .put("id", record.id)
-                    .put("taskId", record.taskId ?: JSONObject.NULL)
-                    .put("taskName", record.taskName)
-                    .put("minutes", record.minutes)
-                    .put("startEpochMillis", record.startEpochMillis)
-                    .put("endEpochMillis", record.endEpochMillis)
-                    .put("source", record.source),
-            )
-        }
-    }
+    fun recordToJson(record: FocusRecord): JSONObject = JSONObject()
+        .put("id", record.id)
+        .put("taskId", record.taskId ?: JSONObject.NULL)
+        .put("taskName", record.taskName)
+        .put("minutes", record.minutes)
+        .put("startEpochMillis", record.startEpochMillis)
+        .put("endEpochMillis", record.endEpochMillis)
+        .put("source", record.source)
 
     /** JSON 里的可空字符串：字段缺失 / null / 空串 / 字符串 "null" 一律当 null */
     private fun JSONObject.optNullableString(key: String): String? {

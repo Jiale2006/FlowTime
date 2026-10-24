@@ -137,7 +137,8 @@ fun WeeklyBarRow(
 
 /**
  * 按天柱状（统计页用）：本周 7 根 / 本月 28-31 根。
- * 超过 10 天时横向滚动（柱宽固定），否则撑满一行；日期每 5 天标一次，今天用主色高亮。
+ * 超过 10 天时横向滚动（柱宽固定），否则撑满一行；日期每 5 天标一次（[labelEveryBar] 可改为每根都标，
+ * 全部档这种稀疏数据必须每根都标，否则日期全被跳掉），今天用主色高亮。
  */
 @Composable
 fun DailyBarsStrip(
@@ -146,14 +147,16 @@ fun DailyBarsStrip(
     barColor: Color = AccentGreen.copy(alpha = 0.65f),
     todayColor: Color = Primary,
     countDelayMillis: Int = 0,
+    labelEveryBar: Boolean = false,
 ) {
     if (days.isEmpty()) return
 
     val maxMinutes = maxOf(days.maxOfOrNull { it.minutes } ?: 0, 30)
     val scrollable = days.size > 10
     val scrollState = rememberScrollState()
-    // 可滚动的月份视图默认停在月初，数据和"今天"都在最右边 → 布局完成后自动滚到今天
-    var autoScrolled by remember { mutableStateOf(false) }
+    // 可滚动的月份/全部视图默认停在月初，数据和"今天"都在最右边 → 布局完成后自动滚到今天。
+    // key 带 days.size：切范围（本月↔全部）后要重新定位，否则会停在上一次的滚动位置
+    var autoScrolled by remember(days.size) { mutableStateOf(false) }
     LaunchedEffect(scrollState.maxValue) {
         if (scrollable && !autoScrolled && scrollState.maxValue > 0) {
             scrollState.scrollTo(scrollState.maxValue)
@@ -174,7 +177,8 @@ fun DailyBarsStrip(
                 enterDelayMillis = countDelayMillis + 80 + index * 22,
             )
             Column(
-                modifier = if (scrollable) Modifier.width(26.dp) else Modifier.weight(1f),
+                // 30dp：装得下 "12/31" 这种 5 字符日期（26dp 会被裁成 "12/3"）
+                modifier = if (scrollable) Modifier.width(30.dp) else Modifier.weight(1f),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(
@@ -193,7 +197,7 @@ fun DailyBarsStrip(
                 )
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = if (!scrollable || index % 5 == 0 || day.isToday) day.label else "",
+                    text = if (!scrollable || labelEveryBar || index % 5 == 0 || day.isToday) day.label else "",
                     fontSize = 10.sp,
                     color = if (day.isToday) todayColor else TextSecondary,
                     fontWeight = if (day.isToday) FontWeight.Medium else FontWeight.Normal,

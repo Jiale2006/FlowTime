@@ -101,6 +101,8 @@ fun AllRecordsScreen(
     val selectedTask = remember(tasks, selectedTaskId) {
         selectedTaskId?.let { id -> tasks.firstOrNull { it.id == id } }
     }
+    /** 活任务 id：记录挂着的任务不在这里面 = 任务已被删除（回收站里或已彻底删） */
+    val liveTaskIds = remember(tasks) { tasks.mapTo(mutableSetOf()) { it.id } }
 
     Box(
         modifier = Modifier.fillMaxSize(),
@@ -200,10 +202,11 @@ fun AllRecordsScreen(
                                     RecordRow(
                                         record = item.record,
                                         showTaskName = true,
+                                        taskDeleted = item.record.taskId?.let { it !in liveTaskIds } == true,
                                         onEditDuration = { editingRecord = item.record },
                                         onDelete = {
                                             deletedRecord = item.record
-                                            viewModel.deleteRecord(item.record.id)
+                                            viewModel.deleteRecord(item.record)
                                         },
                                     )
                                     RecordDivider()
@@ -218,6 +221,7 @@ fun AllRecordsScreen(
         RecordUndoBar(
             visible = deletedRecord != null,
             accent = WarningAmber,
+            seconds = 1,
             onUndo = {
                 deletedRecord?.let { viewModel.restoreRecord(it) }
                 deletedRecord = null

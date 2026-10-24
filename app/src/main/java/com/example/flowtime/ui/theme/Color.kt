@@ -59,6 +59,22 @@ interface AppPalette {
     /** 底部导航条底色 / 未选中项色 */
     val navContainer: Color
     val navItemUnselected: Color
+    /**
+     * 底部导航选中指示器（弹簧胶囊）底色。
+     *
+     * 默认 = primary 22%：胶囊要同时托住图标和文字，太淡会糊成一片，太实会吃掉文字的对比度。
+     * 深底主题按需覆盖。
+     */
+    val navIndicator: Color
+        get() = primary.copy(alpha = 0.22f)
+    /**
+     * 胶囊内的选中图标 / 文字色。
+     *
+     * 选中文字现在落在胶囊底色上，不能再用 primary（浅色主题下对比度只剩 ~4:1）；
+     * 默认用更深的 primaryDark，深底主题各自覆盖。
+     */
+    val navIndicatorContent: Color
+        get() = primaryDark
     /** 卡片阴影墨色与透明度（水彩=晕染 blur，夜航=近黑深影，涂鸦=硬偏移不用 blur） */
     val shadowInk: Color
     val shadowAmbientAlpha: Float
@@ -72,7 +88,11 @@ interface AppPalette {
 
     // ---- 热力图色阶 ----
     /**
-     * 热力图五档色阶（无记录 / <30 / <60 / <90 / ≥90 分钟）。
+     * 热力图五档色阶（无记录 / <1h / 1-2h / 2-4h / ≥4h 分钟）。
+     *
+     * 档位阈值在 `MonthHeatmap.heatColorOf` 里，这里只管颜色。
+     * （2026-10-23 从 <30/<60/<90/≥90 改成现在这套：原来 90 分钟封顶，
+     *  1.5h 和 8h 同色，热力图失去区分度。）
      *
      * 默认实现 = 纸底主题的「半透明颜料叠在卡片上」路线（越专注越深）。
      *
@@ -104,6 +124,14 @@ interface AppPalette {
     val buttonShape: Shape
     /** 胶囊 chip（范围筛选等；涂鸦主题退化为小圆角——禁 rounded-full） */
     val pillShape: Shape
+    /**
+     * 可点击的卡片 / 行（设置项、主题选项等）：行为是按钮，外观沿用卡片材质。
+     *
+     * 默认与 [cardShape] 相同，避免各主题的设置行突然变形；
+     * 单色极简单独放大到按钮圆角，解决"设置页整行按钮还是方的"。
+     */
+    val interactiveShape: Shape
+        get() = cardShape
 
     // ---- 装饰 ----
     /** 手绘风虚线描边（涂鸦主题 true，其余 false 走实线） */
@@ -257,6 +285,8 @@ object NocturnePalette : AppPalette {
     )
     override val navContainer = Color(0xD916233A)
     override val navItemUnselected = Color(0x80FFFFFF)
+    // 深底上默认 primaryDark（MoonSteel 灰）会丢掉香槟色强调，选中内容继续用香槟
+    override val navIndicatorContent = Champagne
     override val shadowInk = NightDeep
     override val shadowAmbientAlpha = 0.35f
     override val shadowSpotAlpha = 0.32f
@@ -358,6 +388,8 @@ object DoodlePalette : AppPalette {
 // 提示词：风格提示词/单色极简.md。规则：只用灰阶九色（#111~#fff，禁一切色相）；
 // 直角~2dp 小圆角（禁 rounded-full）；禁渐变、禁重阴影（shadow-sm 上限）；
 // 层次靠字重对比（标题 bold tracking-tight / 正文 light）与大量负空间。
+// 例外：按钮、可点行与筛选 chip 的圆角按用户反馈放宽到 12dp（buttonShape /
+// interactiveShape / pillShape），卡片与徽章仍守 2dp。
 
 /** 灰阶九色（提示词给定的全部合法色；仅单色场景与调色板使用） */
 val MonoInk = Color(0xFF111111)
@@ -429,8 +461,11 @@ object MonoPalette : AppPalette {
     override val cardShape = RoundedCornerShape(2.dp)     // rounded-sm
     override val tileShape = RoundedCornerShape(2.dp)
     override val badgeShape = RoundedCornerShape(2.dp)
-    override val buttonShape = RoundedCornerShape(2.dp)
-    override val pillShape = RoundedCornerShape(2.dp)     // 禁 rounded-full：胶囊退化为小圆角
+    // 2dp 圆角在真机上观感接近直角（用户反馈"所有按钮太方"）：
+    // 按钮、可点卡片行、筛选胶囊统一放宽到 12dp；卡片本身/徽章仍保留 2dp 的硬朗。
+    override val buttonShape = RoundedCornerShape(12.dp)
+    override val interactiveShape = buttonShape
+    override val pillShape = RoundedCornerShape(12.dp)    // chip 也是按钮：不再压成 2dp 方片
     override val dashedBorders = false
     override val bannerBrush = SolidColor(primary)        // 禁渐变：扁平墨色横幅
 }
@@ -507,6 +542,9 @@ object ParticlePalette : AppPalette {
     )
     override val navContainer = Color(0xE60F1419)          // 深底导航条（90% 沉底）
     override val navItemUnselected = Color(0x80FFFFFF)
+    // 深底上 blue-600 的薄涂层看不见；用亮一档的 blue-500 做胶囊，内容改用 blue-400 保对比度
+    override val navIndicator = ParticleBlue.copy(alpha = 0.30f)
+    override val navIndicatorContent = ParticleBlueLight
     // 辉光代替常规阴影：低不透明度大范围冷蓝扩散（提示词 Nebula Glow）
     override val shadowInk = ParticleBlue
     override val shadowAmbientAlpha = 0.22f
@@ -583,6 +621,8 @@ val DisabledGray: Color get() = ActivePalette.disabledGray
 val TaskCardPalette: List<Pair<Color, Color>> get() = ActivePalette.taskCardPalette
 val NavContainer: Color get() = ActivePalette.navContainer
 val NavItemUnselected: Color get() = ActivePalette.navItemUnselected
+val NavIndicator: Color get() = ActivePalette.navIndicator
+val NavIndicatorContent: Color get() = ActivePalette.navIndicatorContent
 /** 弹窗/弹层容器色（比卡片更实一层，保证可读性）；底部弹层与渐隐遮罩都用它 */
 val DialogContainer: Color get() = ActivePalette.dialogContainer
 

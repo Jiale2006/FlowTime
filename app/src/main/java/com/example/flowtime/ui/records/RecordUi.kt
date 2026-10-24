@@ -30,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -94,6 +95,8 @@ fun RecordRow(
     onEditDuration: () -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
+    /** 该记录的任务已被删除（回收站里待恢复 / 已彻底删）——列表上要看得出来 */
+    taskDeleted: Boolean = false,
 ) {
     val context = LocalContext.current
     val editable = BackfillRules.canEditDuration(record)
@@ -138,6 +141,17 @@ fun RecordRow(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    Spacer(Modifier.width(6.dp))
+                }
+                if (taskDeleted) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .border(1.dp, DividerColor, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 5.dp, vertical = 1.dp),
+                    ) {
+                        Text("已删", fontSize = 10.sp, color = TextSecondary)
+                    }
                     Spacer(Modifier.width(6.dp))
                 }
                 if (record.recordSource == RecordSource.MANUAL) {
@@ -191,11 +205,19 @@ fun RecordUndoBar(
     onUndo: () -> Unit,
     onExpire: () -> Unit,
     modifier: Modifier = Modifier,
-    message: String = "记录已删除",
-    seconds: Int = 6,
+    message: String = "已移入回收站",
+    seconds: Int = 1,
     accent: Color = SuccessGreen,
 ) {
-    LaunchedEffect(visible) {
+    // 退出动画期间调用方已清空状态，message/accent 会被重算成另一种语义：
+    // 任务详情页删除与补录共用一条，"已补录"淡出时会闪成"已移入回收站"。
+    // 缓存最后一次可见时的文案，淡出过程文字与色点保持不动。
+    val shown = remember { mutableStateOf(message to accent) }
+    SideEffect { if (visible) shown.value = message to accent }
+
+    // key 带 seconds：任务详情页那条删除/补录共用，两态时长不同，
+    // 只绑 visible 的话「先删后补」不会重开计时，补录条会只剩删除条的余秒
+    LaunchedEffect(visible, seconds) {
         if (visible) {
             delay(seconds * 1000L)
             onExpire()
@@ -222,10 +244,10 @@ fun RecordUndoBar(
                 Modifier
                     .size(8.dp)
                     .clip(CircleShape)
-                    .background(accent),
+                    .background(shown.value.second),
             )
             Spacer(Modifier.width(10.dp))
-            Text(message, fontSize = 13.sp, color = TextPrimary, modifier = Modifier.weight(1f))
+            Text(shown.value.first, fontSize = 13.sp, color = TextPrimary, modifier = Modifier.weight(1f))
             TextButton(onClick = onUndo) {
                 Text("撤销", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = Primary)
             }

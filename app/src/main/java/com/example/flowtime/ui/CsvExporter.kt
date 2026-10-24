@@ -4,7 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
-import com.example.flowtime.data.Category
 import com.example.flowtime.data.FocusRecord
 import com.example.flowtime.data.FocusTask
 import com.example.flowtime.data.RecordLink
@@ -30,11 +29,10 @@ object CsvExporter {
         mode: Mode,
         records: List<FocusRecord>,
         tasks: List<FocusTask>,
-        categories: List<Category>,
     ): String {
         val body = when (mode) {
-            Mode.DETAIL -> buildDetail(records, tasks, categories)
-            Mode.CATEGORY -> buildCategorySummary(records, tasks, categories)
+            Mode.DETAIL -> buildDetail(records, tasks)
+            Mode.CATEGORY -> buildCategorySummary(records, tasks)
         }
         return "\uFEFF$body"
     }
@@ -51,11 +49,10 @@ object CsvExporter {
         mode: Mode,
         records: List<FocusRecord>,
         tasks: List<FocusTask>,
-        categories: List<Category>,
     ) {
         val dir = File(context.cacheDir, "export").apply { mkdirs() }
         val file = File(dir, fileName(mode))
-        file.writeText(toCsv(mode, records, tasks, categories), Charsets.UTF_8)
+        file.writeText(toCsv(mode, records, tasks), Charsets.UTF_8)
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         val intent = Intent(Intent.ACTION_SEND).apply {
             type = "text/csv"
@@ -73,17 +70,33 @@ object CsvExporter {
         return "%04d-%02d-%02d %02d:%02d".format(t.year, t.monthValue, t.dayOfMonth, t.hour, t.minute)
     }
 
-    /** 全部明细：每条记录一行，含所属大类与起止时间（不再带 source 列：界面上不区分来源了） */
+    /**
+     * 记录所属的「大类」任务：**子任务归到父任务；顶层任务就是它自己**。
+     *
+     * 不能直接用 `TaskIndex.categoryIdOf`（只返回父任务 id）—— 那样任何顶层任务
+     * 自己的记录都会被写成「未分类」，新建一个父任务立刻中招（2026-10-23 他报的）。
+     * 返回 null 只有一种情况：这条记录压根没有归属任务（自由专注 / 任务已被彻底删）。
+     */
+    private fun categoryTaskOf(record: FocusRecord, index: RecordLink.TaskIndex): FocusTask? {
+        val owner = index.ownerOf(record) ?: return null
+        return owner.parentId?.let { index.byId[it] } ?: owner
+    }
+
+    /**
+     * 全部明细：每条记录一行，含所属大类与起止时间（不再带 source 列：界面上不区分来源了）。
+     *
+     * 大类名从 [RecordLink.TaskIndex] 里取而不是外部传一份 `categories`：
+     * 已删任务（回收站墓碑）也在 index 里，导出的历史报表就不会因为删了个任务
+     * 就把那段时间全写成「未分类」。
+     */
     private fun buildDetail(
         records: List<FocusRecord>,
         tasks: List<FocusTask>,
-        categories: List<Category>,
     ): String {
         val index = RecordLink.TaskIndex.of(tasks)
-        val catName = categories.associate { it.id to it.name }
         val sb = StringBuilder("task_name,category,minutes,start_time,end_time\n")
         records.sortedBy { it.endEpochMillis }.forEach { record ->
-            val category = index.categoryIdOf(record)?.let { catName[it] } ?: "未分类"
+            val category = categoryTaskOf(record, index)?.name ?: "未分类"
             sb.append(
                 "${escape(index.displayName(record))},${escape(category)},${record.minutes}," +
                     "${formatTime(record.startEpochMillis)},${formatTime(record.endEpochMillis)}\n",
@@ -96,15 +109,13 @@ object CsvExporter {
     private fun buildCategorySummary(
         records: List<FocusRecord>,
         tasks: List<FocusTask>,
-        categories: List<Category>,
     ): String {
         val index = RecordLink.TaskIndex.of(tasks)
-        val catName = categories.associate { it.id to it.name }
         val sb = StringBuilder("category,total_minutes,total_hours,session_count,task_count\n")
-        records.groupBy { index.categoryIdOf(it) }
+        records.groupBy { categoryTaskOf(it, index)?.id }
             .map { (categoryId, list) ->
                 CategoryRow(
-                    name = categoryId?.let { catName[it] } ?: "未分类",
+                    name = categoryId?.let { index.byId[it]?.name } ?: "未分类",
                     minutes = list.sumOf { it.minutes },
                     sessions = list.size,
                     taskCount = list.map { RecordLink.keyOf(it) }.distinct().size,

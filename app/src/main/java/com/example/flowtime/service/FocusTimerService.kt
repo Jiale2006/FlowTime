@@ -97,16 +97,46 @@ class FocusTimerService : Service() {
         } else {
             action("暂停", "PAUSE")
         }
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val title = if (snapshot.paused) {
+            "已暂停 · ${snapshot.taskName}"
+        } else {
+            "${snapshot.modeLabel} · ${snapshot.taskName}"
+        }
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_task_time)
-            .setContentTitle("${snapshot.modeLabel} · ${snapshot.taskName}")
-            .setContentText(snapshot.displayText)
+            .setContentTitle(title)
+            .setSubText(snapshot.roundText.ifBlank { null })
             .setContentIntent(contentIntent)
             .setOngoing(true)
             .setSilent(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_STOPWATCH)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .addAction(pauseResume)
             .addAction(action("停止", "STOP"))
-            .build()
+
+        // 时间交给系统 Chronometer：由 SystemUI 自己走秒，App 在后台被节流/进 Doze
+        // 都不影响读数（以前推静态文本，切出去就"冻"住，点回前台才跳正）。
+        if (snapshot.chronometerBase > 0L) {
+            builder
+                .setUsesChronometer(true)
+                .setChronometerCountDown(snapshot.chronometerCountDown)
+                .setWhen(snapshot.chronometerBase)
+                .setShowWhen(true)
+                .setContentText(null)
+        } else {
+            // 暂停 / 未开始：静态时间，别让系统按墙钟继续数
+            builder
+                .setUsesChronometer(false)
+                .setShowWhen(false)
+                .setContentText(snapshot.displayText)
+        }
+
+        // 正计时 progressPercent = -1，不画进度条
+        if (snapshot.progressPercent >= 0) {
+            builder.setProgress(100, snapshot.progressPercent, false)
+        }
+        return builder.build()
     }
 
     private fun action(title: String, command: String): NotificationCompat.Action {
@@ -119,6 +149,16 @@ class FocusTimerService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         return NotificationCompat.Action.Builder(null, title, pendingIntent).build()
+    }
+
+    /**
+     * 划掉最近任务：快照已由 AppViewModel 每秒落盘，这里只收掉常驻通知并停服，
+     * 否则会留下一条不再更新的旧计时通知（且前台服务会把进程一直吊着）。
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {

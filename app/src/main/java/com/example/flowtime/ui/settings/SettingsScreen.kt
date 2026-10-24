@@ -47,6 +47,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.NotificationsActive
@@ -97,6 +98,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.flowtime.data.AppSettings
 import com.example.flowtime.data.BackfillRules
 import com.example.flowtime.data.FlowTimeRepository
+import com.example.flowtime.data.TrashStore
 import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.components.ProCard
 import com.example.flowtime.ui.components.pressScale
@@ -129,11 +131,15 @@ private enum class SettingsDialog { PROFILE, THEME, DURATION, POMODORO, RINGTONE
 
 /**
  * 设置页：个人资料（头像 + 昵称）/ 专注时长 / 番茄计时参数 / 番茄铃声 / 习惯提醒（真实本地通知）/ 关于。
+ *
+ * [onOpenTrash] 走导航而不是弹层：回收站要能放一整列记录，弹层里塞不下。
  */
 @Composable
-fun SettingsScreen(viewModel: AppViewModel) {
+fun SettingsScreen(viewModel: AppViewModel, onOpenTrash: () -> Unit) {
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+    val trash by viewModel.trash.collectAsStateWithLifecycle()
+    val trashTasks by viewModel.trashTasks.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var dialog by remember { mutableStateOf<SettingsDialog?>(null) }
 
@@ -256,7 +262,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
             // 默认专注时长（主题横幅高亮卡：笔刷随主题走——水彩/夜航渐变，涂鸦扁平墨色）
             Surface(
                 modifier = Modifier.fillMaxWidth().pressScale().clickable { dialog = SettingsDialog.DURATION },
-                shape = ActivePalette.cardShape,
+                shape = ActivePalette.interactiveShape,
                 color = Color.Transparent,
                 shadowElevation = 0.dp,
             ) {
@@ -265,7 +271,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
                         .fillMaxWidth()
                         .background(
                             ActivePalette.bannerBrush,
-                            ActivePalette.cardShape,
+                            ActivePalette.interactiveShape,
                         )
                         .padding(Dimens.RowPadding),
                     verticalAlignment = Alignment.CenterVertically,
@@ -343,6 +349,7 @@ fun SettingsScreen(viewModel: AppViewModel) {
                     .fillMaxWidth()
                     .pressScale()
                     .clickable { dialog = SettingsDialog.REMINDER },
+                shape = ActivePalette.interactiveShape,
             ) {
                 Column(Modifier.padding(Dimens.CardPadding)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -391,6 +398,30 @@ fun SettingsScreen(viewModel: AppViewModel) {
             Spacer(Modifier.height(Dimens.SectionGap))
 
             SectionTitle("其他")
+
+            SettingsCard(onClick = onOpenTrash) {
+                IconChip(Icons.Default.Delete)
+                Spacer(Modifier.width(Dimens.IconTextGap))
+                Column(Modifier.weight(1f)) {
+                    Text("回收站", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+                    Text(
+                        if (trashTasks.isEmpty() && trash.isEmpty()) {
+                            "删除的任务与记录 · 保留 ${TrashStore.RETENTION_DAYS} 天"
+                        } else {
+                            buildString {
+                                if (trashTasks.isNotEmpty()) append("${trashTasks.size} 个任务")
+                                if (trashTasks.isNotEmpty() && trash.isNotEmpty()) append("、")
+                                if (trash.isNotEmpty()) append("${trash.size} 条记录")
+                                append("可恢复 · 保留 ${TrashStore.RETENTION_DAYS} 天")
+                            }
+                        },
+                        fontSize = 13.sp,
+                        color = TextSecondary,
+                    )
+                }
+                Chevron()
+            }
+            Spacer(Modifier.height(Dimens.CardGap))
 
             SettingsCard(onClick = { dialog = SettingsDialog.BACKUP }) {
                 IconChip(Icons.Default.Save)
@@ -529,7 +560,12 @@ private fun SectionTitle(title: String) {
 
 @Composable
 private fun SettingsCard(onClick: () -> Unit, content: @Composable () -> Unit) {
-    ProCard(modifier = Modifier.fillMaxWidth().pressScale().clickable(onClick = onClick)) {
+    // 整行可点：视觉上是卡片，行为是按钮，圆角跟 interactiveShape 走
+    // （单色极简下与按钮同为 12dp；其余主题沿用卡片圆角）
+    ProCard(
+        modifier = Modifier.fillMaxWidth().pressScale().clickable(onClick = onClick),
+        shape = ActivePalette.interactiveShape,
+    ) {
         Row(Modifier.padding(Dimens.RowPadding), verticalAlignment = Alignment.CenterVertically) {
             content()
         }
@@ -640,10 +676,10 @@ private fun ThemeOptionRow(
                 }
             }
             .onGloballyPositioned { coords = it }
-            .clip(ActivePalette.tileShape)
+            .clip(ActivePalette.interactiveShape)
             .background(if (selected) CardGreenLight else Color.Transparent)
             .sketchStroke(
-                ActivePalette.tileShape,
+                ActivePalette.interactiveShape,
                 if (selected) Primary else DividerColor,
                 1.dp,
             )
@@ -964,7 +1000,7 @@ private fun RingtoneDialog(settings: AppSettings, viewModel: AppViewModel, onDis
         title = { Text("番茄铃声", fontWeight = FontWeight.Medium) },
         text = {
             Column {
-                SwitchRow("完成提示音", "专注段结束响一声", ringtone) { ringtone = it }
+                SwitchRow("完成提示音", "专注段结束轻震一下；开启后同时响铃", ringtone) { ringtone = it }
                 Spacer(Modifier.height(8.dp))
                 SwitchRow("自动开始下一轮", "休息结束后自动进入下一轮专注", autoStart) { autoStart = it }
             }

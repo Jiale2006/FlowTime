@@ -48,6 +48,10 @@ interface FlowTimeDao {
     @Query("SELECT COUNT(*) FROM records")
     suspend fun recordCount(): Int
 
+    /** 按 id 取一条；回收站恢复前用它判断原 id 是否已被新记录占用 */
+    @Query("SELECT * FROM records WHERE id = :id")
+    suspend fun recordById(id: Long): FocusRecord?
+
     @Query("DELETE FROM tasks")
     suspend fun deleteAllTasks()
 
@@ -65,6 +69,10 @@ interface FlowTimeDao {
     /** 删一条记录 */
     @Query("DELETE FROM records WHERE id = :id")
     suspend fun deleteRecord(id: Long)
+
+    /** 批量删记录（删除任务时把名下记录一起摘进回收站） */
+    @Query("DELETE FROM records WHERE id IN (:ids)")
+    suspend fun deleteRecords(ids: List<Long>)
 
     @Query("DELETE FROM records")
     suspend fun clearRecords()

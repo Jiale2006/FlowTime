@@ -99,30 +99,43 @@ fun CompletionScreen(
                     color = TextPrimary,
                 )
             }
-            AnimatedVisibility(
-                visible = contentVisible,
-                enter = fadeIn(tween(600)) + slideInVertically(tween(600)) { it / 6 },
+            // 奖杯 + 时长 + 鼓励语：整组在标题栏与底部任务卡之间垂直居中后**再上抬 36dp**
+            // （他要"放屏幕中央上方一点"；单独挪文字会破坏组内间距，所以整组一起抬）
+            Box(
+                modifier = Modifier.fillMaxWidth().weight(1f),
+                contentAlignment = Alignment.Center,
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Spacer(Modifier.height(48.dp))
-                    Icon(
-                        Icons.Default.EmojiEvents,
-                        contentDescription = "奖杯",
-                        tint = Gold,
-                        modifier = Modifier.size(88.dp),
-                    )
-                    Spacer(Modifier.height(16.dp))
-                    Text(
-                        "+${formatMinutesHm(record?.minutes ?: 0)}",
-                        fontSize = 44.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Primary,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text("干得好，继续保持", fontSize = 16.sp, color = TextSecondary)
+                // BoxScope 里要显式用顶层 AnimatedVisibility，避免解析到 ColumnScope 扩展
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = contentVisible,
+                    enter = fadeIn(tween(600)) + slideInVertically(tween(600)) { it / 6 },
+                ) {
+                    // 🔴 上移用 padding，不能用 offset：offset 只改绘制不改测量，
+                    // 内容会画出容器边界，而 AnimatedVisibility 默认 clip=true →
+                    // 奖杯上半截被裁掉、动画走完才"补"出来（他报的"上一半延迟显示"）。
+                    // 底部留 72dp 让居中位置等效上抬 36dp。
+                    Column(
+                        modifier = Modifier.padding(bottom = 72.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Icon(
+                            Icons.Default.EmojiEvents,
+                            contentDescription = "奖杯",
+                            tint = Gold,
+                            modifier = Modifier.size(88.dp),
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            "+${formatMinutesHm(record?.minutes ?: 0)}",
+                            fontSize = 44.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Primary,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text("干得好，继续保持", fontSize = 16.sp, color = TextSecondary)
+                    }
                 }
             }
-            Spacer(Modifier.weight(1f))
             ProCard(modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(Dimens.CardPadding)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {

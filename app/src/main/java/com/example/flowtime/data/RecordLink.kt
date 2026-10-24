@@ -9,6 +9,12 @@ package com.example.flowtime.data
  */
 object RecordLink {
 
+    /**
+     * 无归属记录的统一显示名（自由专注 / 任务被彻底删掉后的历史记录）。
+     * 统计里遇到归属不到活任务的记录一律用它 —— **绝不回显已删任务的名字**。
+     */
+    const val FREE_NAME = "自由专注"
+
     private const val NAME_PREFIX = "name:"
 
     /** 聚合分组键：有 taskId 用 id，否则用名字（自由专注 / 已删除任务） */
@@ -24,8 +30,12 @@ object RecordLink {
     fun keysOf(task: FocusTask): Set<String> = setOf(keyOfTask(task), NAME_PREFIX + task.name)
 
     /** 记录是否属于该任务 */
-    fun belongsTo(record: FocusRecord, task: FocusTask): Boolean =
-        if (record.taskId != null) record.taskId == task.id else record.taskName == task.name
+    fun belongsTo(record: FocusRecord, task: FocusTask): Boolean = when {
+        // 虚拟「自由专注」：所有没挂任务的记录（自由计时 + 任务被彻底删后放生的）都算它的
+        task.isFreeFocus -> record.taskId == null
+        record.taskId != null -> record.taskId == task.id
+        else -> record.taskName == task.name
+    }
 
     /**
      * 「该任务 + 它的**直接子任务**」的归属判定，返回谓词（一次构建、多次使用，
@@ -54,6 +64,9 @@ object RecordLink {
     /**
      * 任务查找表：统计、导出、任务页共用一份，避免每处各写一遍 id/名字映射。
      * 改名不断链的关键就在这里 —— 记录先按 taskId 找，找不到才退回名字。
+     *
+     * 已删除任务的记录**不在 `records` 表里**（删任务时一起进了回收站），
+     * 所以这里不需要墓碑：统计天然不会出现"已删任务"。
      */
     data class TaskIndex(
         val byId: Map<String, FocusTask>,
