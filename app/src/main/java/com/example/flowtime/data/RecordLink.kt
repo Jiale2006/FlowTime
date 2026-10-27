@@ -32,7 +32,7 @@ object RecordLink {
     /** 记录是否属于该任务 */
     fun belongsTo(record: FocusRecord, task: FocusTask): Boolean = when {
         // 虚拟「自由专注」：所有没挂任务的记录（自由计时 + 任务被彻底删后放生的）都算它的
-        task.isFreeFocus -> record.taskId == null
+        task.isFreeFocus -> record.taskId == null || record.taskId == FocusTask.FREE_FOCUS_ID
         record.taskId != null -> record.taskId == task.id
         else -> record.taskName == task.name
     }

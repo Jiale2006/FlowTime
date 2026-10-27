@@ -19,8 +19,8 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface FlowTimeDao {
 
-    /** 任务：按插入顺序返回（rowid 稳定） */
-    @Query("SELECT * FROM tasks ORDER BY rowid")
+    /** 任务：先按手动排序，再按插入顺序（没拖过的旧任务 sortOrder 都是 0） */
+    @Query("SELECT * FROM tasks ORDER BY sortOrder, rowid")
     fun tasks(): Flow<List<FocusTask>>
 
     @Query("SELECT * FROM tasks")
@@ -37,6 +37,40 @@ interface FlowTimeDao {
 
     @Query("DELETE FROM tasks WHERE id IN (:ids)")
     suspend fun deleteTasks(ids: List<String>)
+
+    /** 归档/取消归档（调用方负责级联子任务） */
+    @Query("UPDATE tasks SET archived = :archived WHERE id IN (:ids)")
+    suspend fun setArchived(ids: List<String>, archived: Boolean)
+
+    /** 排序：按传入顺序写成 1..n（一个事务内写完，中途失败不会留半套顺序） */
+    @Query("UPDATE tasks SET sortOrder = :sortOrder WHERE id = :id")
+    suspend fun setSortOrder(id: String, sortOrder: Int)
+
+    @Query("SELECT COALESCE(MAX(sortOrder), 0) FROM tasks")
+    suspend fun maxSortOrder(): Int
+
+    @Transaction
+    suspend fun applyOrder(orderedIds: List<String>) {
+        orderedIds.forEachIndexed { index, id -> setSortOrder(id, index + 1) }
+    }
+
+    /**
+     * 改一个任务（改名 / 换图标配色）。
+     * **必须用 @Update 而不是 insertTask 的 REPLACE**：REPLACE = 先删后插，
+     * rowid 会变（任务列表按 rowid 排序），改个名字任务就跳到列表末尾了。
+     */
+    @Update
+    suspend fun updateTaskRow(task: FocusTask)
+
+    /** 改名后同步记录里的名字快照 —— 列表行直接用 taskName 显示，不刷就是旧名 */
+    @Query("UPDATE records SET taskName = :name WHERE taskId = :taskId")
+    suspend fun renameRecords(taskId: String, name: String)
+
+    @Transaction
+    suspend fun renameTask(task: FocusTask) {
+        updateTaskRow(task)
+        renameRecords(task.id, task.name)
+    }
 
     /** 记录：按结束时间升序（导出与分页都按时间走） */
     @Query("SELECT * FROM records ORDER BY endEpochMillis")
@@ -96,7 +130,7 @@ interface FlowTimeDao {
 
 @Database(
     entities = [FocusTask::class, FocusRecord::class],
-    version = 2,
+    version = 3,
     exportSchema = false,
 )
 abstract class FlowTimeDatabase : RoomDatabase() {
@@ -117,6 +151,20 @@ abstract class FlowTimeDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v2 → v3：tasks 表加 `archived`（归档）与 `sortOrder`（手动排序键）。
+         *
+         * 两条 ALTER 都带 `DEFAULT 0`，与实体上的 `@ColumnInfo(defaultValue = "0")`
+         * 一致，否则迁移后 Room 的 schema 校验会失败。旧任务自然就是“未归档 + sortOrder 0”，
+         * 而 `ORDER BY sortOrder, rowid` 在全部为 0 时等价于原来的插入顺序 —— 清单不会被打乱。
+         */
+        val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tasks ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE tasks ADD COLUMN sortOrder INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         @Volatile
         private var instance: FlowTimeDatabase? = null
 
@@ -126,7 +174,7 @@ abstract class FlowTimeDatabase : RoomDatabase() {
                 FlowTimeDatabase::class.java,
                 "flowtime.db",
             )
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .build()
                 .also { instance = it }
         }

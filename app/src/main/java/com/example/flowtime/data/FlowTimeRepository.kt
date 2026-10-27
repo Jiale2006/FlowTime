@@ -59,6 +59,7 @@ class FlowTimeRepository(private val context: Context) {
         val POMODORO_TIP_SHOWN = booleanPreferencesKey("pomodoro_tip_shown")
         val DEFAULT_MINUTES = intPreferencesKey("default_minutes")
         val TASK_LIST_VIEW = booleanPreferencesKey("task_list_view")
+        val FREE_FOCUS_ORDER = intPreferencesKey("free_focus_order")
         val DURATION_MIGRATED = booleanPreferencesKey("duration_default_migrated")
         val RINGTONE = booleanPreferencesKey("ringtone_enabled")
         val AUTO_START = booleanPreferencesKey("auto_start")
@@ -66,6 +67,7 @@ class FlowTimeRepository(private val context: Context) {
         val REMINDER = stringPreferencesKey("reminder_time")
         val STATS_RANGE = stringPreferencesKey("stats_range")
         val THEME_MODE = stringPreferencesKey("theme_mode")
+        val FREE_FOCUS_SEEDED = booleanPreferencesKey("free_focus_seeded")
     }
 
     val tasks: Flow<List<FocusTask>> = dao.tasks()
@@ -79,6 +81,7 @@ class FlowTimeRepository(private val context: Context) {
         avatarPath = prefs[Keys.AVATAR_PATH].orEmpty(),
         defaultDurationMinutes = prefs[Keys.DEFAULT_MINUTES] ?: DEFAULT_DURATION_MINUTES,
         taskListView = prefs[Keys.TASK_LIST_VIEW] ?: false,
+        freeFocusOrder = prefs[Keys.FREE_FOCUS_ORDER] ?: 0,
         ringtoneEnabled = prefs[Keys.RINGTONE] ?: true,
         autoStart = prefs[Keys.AUTO_START] ?: true,
         dailyGoalMinutes = prefs[Keys.DAILY_GOAL] ?: 120,
@@ -92,6 +95,22 @@ class FlowTimeRepository(private val context: Context) {
         statsRange = prefs[Keys.STATS_RANGE] ?: "WEEK",
         themeMode = prefs[Keys.THEME_MODE] ?: "NOCTURNE",
     )
+
+    /**
+     * 「自由专注」从虚拟聚合行升级成**真任务行**（id 仍是 `__free_focus__`），
+     * 这样归档 / 删除 / 拖动排序和普通任务走同一套代码。
+     *
+     * 只播种一次：用户主动把它删掉之后不能再自动复活（`FREE_FOCUS_SEEDED` 标记）。
+     * 老记录不迁移——`RecordLink.belongsTo` 里 `taskId == null` 的记录仍算它名下。
+     */
+    suspend fun ensureFreeFocusTask() = withContext(Dispatchers.IO) {
+        val prefs = context.flowTimeStore.data.first()
+        if (prefs[Keys.FREE_FOCUS_SEEDED] == true) return@withContext
+        if (dao.tasksOnce().none { it.id == FocusTask.FREE_FOCUS_ID }) {
+            dao.insertTask(FocusTask.freeFocus())
+        }
+        context.flowTimeStore.edit { it[Keys.FREE_FOCUS_SEEDED] = true }
+    }
 
     /**
      * 一次性迁移：旧版本「默认时长」默认值是 25 分钟，且任何一次设置保存都会把它写进偏好，
@@ -165,9 +184,46 @@ class FlowTimeRepository(private val context: Context) {
                 colorIndex = colorIndex,
                 iconIndex = iconIndex,
                 parentId = parentId,
+                // 新建的排到最后；已有任务 sortOrder 全为0时这条一定 > 0
+                sortOrder = dao.maxSortOrder() + 1,
             ),
         )
     }
+
+    /**
+     * 归档 / 取消归档：**只改标志位**，记录不动、任务本体不删。
+     *
+     * 大类（挂了子任务的任务）级联：子任务只在大类下出现，单独隐藏大类会留下“孤儿”行。
+     */
+    suspend fun archiveTask(taskId: String, archived: Boolean) = withContext(Dispatchers.IO) {
+        dao.setArchived(collectSubtree(taskId, dao.tasksOnce()).toList(), archived)
+    }
+
+    /** 批量归档 / 取消归档（父任务被选时子任务会级联，重复设置没有副作用） */
+    suspend fun archiveTasks(taskIds: List<String>, archived: Boolean) = withContext(Dispatchers.IO) {
+        val all = dao.tasksOnce()
+        // 只留根任务：子任务跟着父任务一起变，逐个再设一遍只是浪费时间
+        taskIds.filter { id -> all.none { it.id == id && it.parentId in taskIds } }
+            .forEach { id -> dao.setArchived(collectSubtree(id, all).toList(), archived) }
+    }
+
+    /**
+     * 批量删除：逐个走 [deleteTask]（回收站按“父任务 + 它的记录”成组存）。
+     * 子任务被选中时跳过 —— 父任务已经把它带走了，再删一次会在回收站留空条目。
+     */
+    suspend fun deleteTasks(taskIds: List<String>) = withContext(Dispatchers.IO) {
+        val all = dao.tasksOnce()
+        taskIds.filter { id -> all.none { it.id == id && it.parentId in taskIds } }
+            .forEach { id -> deleteTask(id) }
+    }
+
+    /** 拖动排序：按传入顺序（**只包含同组任务**）重写 sortOrder */
+    suspend fun reorderTasks(orderedIds: List<String>) = withContext(Dispatchers.IO) {
+        if (orderedIds.isNotEmpty()) dao.applyOrder(orderedIds)
+    }
+
+    /** 改任务（改名 / 换图标配色）：任务行 + 记录里的名字快照一起更新（事务内） */
+    suspend fun updateTask(task: FocusTask) = dao.renameTask(task)
 
     /**
      * 删除任务：任务（含子任务）**连同它名下的记录**一起进回收站（一次删除动作 = 一条条目）。
@@ -225,6 +281,13 @@ class FlowTimeRepository(private val context: Context) {
     suspend fun deleteRecord(record: FocusRecord) = withContext(Dispatchers.IO) {
         trash.add(record)
         dao.deleteRecord(record.id)
+    }
+
+    /** 批量删记录（记录页多选）：同样先落回收站再删库，回收站一次写完 */
+    suspend fun deleteRecords(records: List<FocusRecord>) = withContext(Dispatchers.IO) {
+        if (records.isEmpty()) return@withContext
+        trash.addAll(records)
+        dao.deleteRecords(records.map { it.id })
     }
 
     // ---- 回收站 ----
@@ -346,12 +409,22 @@ class FlowTimeRepository(private val context: Context) {
         }
     }
 
+    /**
+     * 只改「倒计时默认时长」这一个键。
+     * 首页拨完时长后写回（见 `AppViewModel.selectDuration`），下次启动直接沿用它；
+     * 不整包 read-modify-write —— 避免和设置页同时保存时互相覆盖。
+     */
+    suspend fun setDefaultDurationMinutes(minutes: Int) {
+        context.flowTimeStore.edit { prefs -> prefs[Keys.DEFAULT_MINUTES] = minutes }
+    }
+
     suspend fun updateSettings(settings: AppSettings) {
         context.flowTimeStore.edit { prefs ->
             prefs[Keys.NICKNAME] = settings.nickname
             prefs[Keys.AVATAR_PATH] = settings.avatarPath
             prefs[Keys.DEFAULT_MINUTES] = settings.defaultDurationMinutes
             prefs[Keys.TASK_LIST_VIEW] = settings.taskListView
+            prefs[Keys.FREE_FOCUS_ORDER] = settings.freeFocusOrder
             prefs[Keys.RINGTONE] = settings.ringtoneEnabled
             prefs[Keys.AUTO_START] = settings.autoStart
             prefs[Keys.DAILY_GOAL] = settings.dailyGoalMinutes

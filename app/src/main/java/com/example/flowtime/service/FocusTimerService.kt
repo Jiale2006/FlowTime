@@ -9,10 +9,12 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.example.flowtime.MainActivity
 import com.example.flowtime.R
+import com.example.flowtime.data.TimerSnapshotStore
 import com.example.flowtime.ui.FocusTimerBus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -27,38 +29,84 @@ class FocusTimerService : Service() {
         private const val CHANNEL_ID = "focus_timer"
         private const val NOTIFICATION_ID = 1001
         private const val EXTRA_COMMAND = "command"
+        private const val TAG = "FocusTimerService"
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var collecting = false
+    private val store by lazy { TimerSnapshotStore(this) }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.getStringExtra(EXTRA_COMMAND)) {
-            "PAUSE" -> scope.launch { FocusTimerBus.commands.emit(FocusTimerBus.Command.PAUSE) }
-            "RESUME" -> scope.launch { FocusTimerBus.commands.emit(FocusTimerBus.Command.RESUME) }
-            "STOP" -> scope.launch { FocusTimerBus.commands.emit(FocusTimerBus.Command.STOP) }
-        }
+        intent?.getStringExtra(EXTRA_COMMAND)?.let { dispatch(it) }
         createChannel()
-        startForegroundWithType(buildNotification(FocusTimerBus.snapshot.value))
-        if (!collecting) {
-            collecting = true
-            scope.launch {
-                FocusTimerBus.snapshot.collect { snapshot ->
-                    if (!snapshot.active) {
-                        stopForeground(STOP_FOREGROUND_REMOVE)
-                        stopSelf()
-                    } else {
-                        runCatching {
-                            NotificationManagerCompat.from(this@FocusTimerService)
-                                .notify(NOTIFICATION_ID, buildNotification(snapshot))
-                        }
+        startForegroundWithType(buildNotification(currentSnapshot()))
+        startCollectingIfNeeded()
+        return START_STICKY
+    }
+
+    /**
+     * 通知栏按钮 → 命令。
+     *
+     * 🔴 先落盘再广播（2026-10-26）：命令只走进程内总线时，App 在后台被系统回收、
+     * 服务被 START_STICKY 重建而 ViewModel 还没回来，命令就无处投递、直接消失。
+     * 用户点「停止」后这段计时随之丢失。落盘后 VM 晚一步恢复也能补做。
+     */
+    private fun dispatch(raw: String) {
+        val command = runCatching { FocusTimerBus.Command.valueOf(raw) }.getOrNull() ?: return
+        store.savePendingCommand(command.name)
+        FocusTimerBus.post(command)
+    }
+
+    /**
+     * 总线里的实时快照优先；为空（进程刚被重建、VM 还没恢复）时用落盘快照兜底，
+     * 否则通知会直接消失 —— 用户看着像是计时被清掉了，也点不到停止。
+     */
+    private fun currentSnapshot(): FocusTimerBus.Snapshot {
+        val live = FocusTimerBus.snapshot.value
+        if (live.active) return live
+        val saved = store.load() ?: return live
+        return FocusTimerBus.Snapshot(
+            active = true,
+            paused = true,
+            // 任务名要靠 VM 的任务列表查，这里查不到；交给 VM 回来后的快照覆盖
+            taskName = "",
+            displayText = "已暂停，点回应用继续",
+            modeLabel = if (saved.mode == "COUNT_UP") "正计时" else "倒计时",
+            progressPercent = if (saved.mode == "COUNT_UP" || saved.totalMillis <= 0L) {
+                -1
+            } else {
+                ((saved.elapsedMillis * 100) / saved.totalMillis).toInt().coerceIn(0, 100)
+            },
+        ).also { FocusTimerBus.snapshot.value = it }
+    }
+
+    private fun startCollectingIfNeeded() {
+        if (collecting) return
+        collecting = true
+        scope.launch {
+            FocusTimerBus.snapshot.collect { snapshot ->
+                if (!snapshot.active) {
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                } else {
+                    // 前台服务的通知优先用 startForeground 更新（官方推荐的那条路）：
+                    // notify() 更新在部分 ROM 上会被忽略，通知就永远停在启动那一刻的内容
+                    // —— 任务名不跟着变。快照现在只在语义变化时发射，频率很低，可以放心走这里。
+                    runCatching {
+                        startForegroundWithType(buildNotification(snapshot))
+                    }.recoverCatching {
+                        NotificationManagerCompat.from(this@FocusTimerService)
+                            .notify(NOTIFICATION_ID, buildNotification(snapshot))
+                    }.onFailure {
+                        // 以前静默吞掉：通知权限被关时这里一直失败，
+                        // 界面上就是「通知永远停在旧任务名」，查都没法查
+                        Log.w(TAG, "update notification failed: ${it.message}")
                     }
                 }
             }
         }
-        return START_STICKY
     }
 
     private fun startForegroundWithType(notification: Notification) {
@@ -97,10 +145,11 @@ class FocusTimerService : Service() {
         } else {
             action("暂停", "PAUSE")
         }
+        val name = snapshot.taskName.ifBlank { "专注" }
         val title = if (snapshot.paused) {
-            "已暂停 · ${snapshot.taskName}"
+            "已暂停 · $name"
         } else {
-            "${snapshot.modeLabel} · ${snapshot.taskName}"
+            "${snapshot.modeLabel} · $name"
         }
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_task_time)
@@ -113,7 +162,10 @@ class FocusTimerService : Service() {
             .setCategory(NotificationCompat.CATEGORY_STOPWATCH)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .addAction(pauseResume)
-            .addAction(action("停止", "STOP"))
+            // 「停止」= 结束并记录（与计时页的「结束并记录」同语义）。
+            // 🔴 以前这条映射到 cancelFocus（丢弃数据、不写记录），
+            //    用户点了停止，40 分钟直接蒸发（2026-10-26 他报的问题）。
+            .addAction(action("停止并记录", "STOP"))
 
         // 时间交给系统 Chronometer：由 SystemUI 自己走秒，App 在后台被节流/进 Doze
         // 都不影响读数（以前推静态文本，切出去就"冻"住，点回前台才跳正）。

@@ -1,11 +1,12 @@
 package com.example.flowtime.ui
 
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * 计时状态总线：ViewModel 为唯一状态源，服务只读快照渲染通知；
- * 通知按钮命令经 SharedFlow 回传 VM 执行（避免双状态源）。
+ * 通知按钮命令回传给 VM 执行（避免双状态源）。
  */
 object FocusTimerBus {
 
@@ -35,5 +36,23 @@ object FocusTimerBus {
 
     enum class Command { PAUSE, RESUME, STOP }
 
-    val commands = MutableSharedFlow<Command>(extraBufferCapacity = 4)
+    /**
+     * 通知栏命令。**必须用 StateFlow（粘性）而不是 SharedFlow**：
+     * 以前是 SharedFlow 无 replay，只投递给「此刻正在收集」的订阅者，
+     * 进程被系统回收后服务重建（START_STICKY）时 VM 还没回来，
+     * 命令直接被丢掉 —— 用户点了停止，记录就凭空消失了。
+     *
+     * 现在命令同时落盘（见 [com.example.flowtime.data.TimerSnapshotStore]），
+     * VM 处理完必须调 [consume] 清空，否则下次重建会重放。
+     */
+    private val _command = MutableStateFlow<Command?>(null)
+    val command: StateFlow<Command?> = _command.asStateFlow()
+
+    fun post(command: Command) {
+        _command.value = command
+    }
+
+    fun consume() {
+        _command.value = null
+    }
 }

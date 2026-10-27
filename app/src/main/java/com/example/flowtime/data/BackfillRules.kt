@@ -195,13 +195,19 @@ object BackfillRules {
         return Defaults(daysAgo = 1, endHour = endHour, endMinute = endMinute, durationMinutes = duration)
     }
 
-    /** 只有手动补录的记录允许改时长；真实计时的时长是客观发生的，不给改 */
-    fun canEditDuration(record: FocusRecord): Boolean =
-        record.recordSource == RecordSource.MANUAL
+    /**
+     * 所有记录都允许改时长（2026-10-25 放开）。
+     *
+     * 原来只放 MANUAL，理由是"真实计时的时长是客观发生的"；但误触的倒计时跑完一趟
+     * 就变成一段删不掉的假数据，用户只能删掉重补。**统计的数据要可控**优先于
+     * "时长不可篡改"，所以 [RecordSource] 从此只是来源标签（列表上的「补」），不再管权限。
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun canEditDuration(record: FocusRecord): Boolean = true
 
     /**
      * 改时长：**结束时刻不变**（锚点），开始时刻按新时长回退。
-     * 返回 null 表示这条记录不允许改（见 [canEditDuration]）。
+     * 返回 null 只留给"时长非法到算不出区间"的兜底（见 [canEditDuration] 已恒为 true）。
      */
     fun withDuration(record: FocusRecord, minutes: Int): FocusRecord? {
         if (!canEditDuration(record)) return null

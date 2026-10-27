@@ -15,9 +15,11 @@ data class Category(
 )
 
 /**
- * 记录来源。
- * - [TIMER]：真实计时产生（含番茄专注段）；时长是客观发生的，**不允许改**
- * - [MANUAL]：手动补录；时长允许修改
+ * 记录来源。**只是来源标签**（列表上的「补」），不再决定能不能改：
+ * 2026-10-25 起两类记录都允许改时长（见 `BackfillRules.canEditDuration`）。
+ *
+ * - [TIMER]：真实计时产生（含番茄专注段）
+ * - [MANUAL]：手动补录
  *
  * 存成字符串而不是枚举，省掉 Room TypeConverter；旧数据没有这个列时按 [TIMER] 处理。
  */
@@ -46,6 +48,10 @@ data class FocusTask(
     val colorIndex: Int,
     val iconIndex: Int,
     val parentId: String? = null,
+    /** 归档 = “不在进行”：只从任务清单/选择器隐藏，记录与统计一分不动 */
+    @ColumnInfo(defaultValue = "0") val archived: Boolean = false,
+    /** 手动排序键（同组内升序；没拖过的旧任务都是 0，按插入顺序兜底） */
+    @ColumnInfo(defaultValue = "0") val sortOrder: Int = 0,
 ) {
     /** 是不是那个虚拟的「自由专注」条目（不落库，只在任务清单/详情页当聚合入口） */
     val isFreeFocus: Boolean get() = id == FREE_FOCUS_ID
@@ -106,6 +112,8 @@ data class AppSettings(
     val defaultDurationMinutes: Int = 45,
     /** 任务清单视图：true = 列表视图，false = 网格视图（持久化，退出应用后保持） */
     val taskListView: Boolean = false,
+    /** 「自由专注」在任务清单里的排位（1 = 第一行）；拖动排序时和真实任务一起重排 */
+    val freeFocusOrder: Int = 0,
     val ringtoneEnabled: Boolean = true,
     val autoStart: Boolean = true,
     val dailyGoalMinutes: Int = 120,

@@ -44,7 +44,7 @@ import com.example.flowtime.ui.components.DayQuickChip
 import com.example.flowtime.ui.components.FlowAlertDialog
 import com.example.flowtime.ui.components.HourMinuteWheel
 import com.example.flowtime.ui.components.MonthCalendar
-import com.example.flowtime.ui.components.formatMinutesHm
+import com.example.flowtime.ui.components.formatMinutesCompact
 import com.example.flowtime.ui.components.pastDayLabel
 import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.CardGreenLight
@@ -62,12 +62,11 @@ import java.time.YearMonth
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 
-/** 弹层开局用的初始值（已做过重叠避让） */
+/** 弹层开局用的初始值（日期与结束时刻，已做过重叠避让）；时长不猜，固定 0 */
 private data class Seed(
     val daysAgo: Int,
     val endHour: Int,
     val endMinute: Int,
-    val durationMinutes: Int,
 )
 
 /** 哪个字段的选择器开着（全部走居中对话框，与贴底弹窗不同侧，层次一眼能看懂） */
@@ -115,23 +114,29 @@ fun BackfillDialog(
     var picker by remember { mutableStateOf(FieldPicker.NONE) }
     val pickedTask = tasks.firstOrNull { it.id == taskId }
 
-    // 初始值：按该任务历史猜（日期固定昨天）；猜出的段撞上已有记录就静默往后挪（有护栏）。
+    // 初始值：日期固定昨天 + 结束时刻按该任务历史猜；猜出的段撞上已有记录就静默往后挪（有护栏）。
     // **只在初始值上做一次**——用户拨过滚轮之后再自动挪，值会在手指底下自己跳。
+    // 时长不参与（默认 0h0min，见下面的 duration）。
     val seed = remember(taskId, records) {
         val d = BackfillRules.defaultsFor(records, taskId, zone)
         val day = today.minusDays(d.daysAgo.toLong())
         val raw = BackfillRules.resolve(day, d.endHour, d.endMinute, d.durationMinutes, nowMillis, zone)
         val adjusted = BackfillRules.avoidOverlap(raw, records, taskId, zone) ?: raw
         val end = Instant.ofEpochMilli(adjusted.endMillis).atZone(zone)
-        Seed(d.daysAgo, end.hour, end.minute, adjusted.minutes)
+        Seed(d.daysAgo, end.hour, end.minute)
     }
     var daysAgo by remember(seed) { mutableStateOf(seed.daysAgo) }
     var endHour by remember(seed) { mutableStateOf(seed.endHour) }
     var endMinute by remember(seed) { mutableStateOf(seed.endMinute) }
-    var duration by remember(seed) { mutableStateOf(seed.durationMinutes) }
+    // 🔴 时长**不猜、默认 0h0min**（他 2026-10-26 明确定）：补录是"我想记多久"，不是让 App 替他决定。
+    //    猜出来的时长（历史众数 30min / 3h20min）反而要先拨掉才能用，多一步。
+    //    0 = 还没设 → 滚轮就是 00h 00min，「补录」按钮不可点，必须自己拨。
+    var duration by remember(seed) { mutableStateOf(0) }
 
     val date = today.minusDays(daysAgo.toLong())
     val capMinutes = BackfillRules.endCapMinutes(date, nowMillis, zone)
+    // 时长没设时 span 不能当真：resolve 内部会把 0 兜成 1min，拿来算重叠/预览都是假数据
+    val durationSet = duration >= BackfillRules.MIN_MINUTES
 
     // 切到「今天」时，把已经拨到未来的结束时刻拉回此刻（否则字段显示和落库值会对不上）
     LaunchedEffect(daysAgo) {
@@ -155,18 +160,23 @@ fun BackfillDialog(
     }
 
     val span = BackfillRules.resolve(date, endHour, endMinute, duration, nowMillis, zone)
-    val conflicts = BackfillRules.overlapping(records, taskId, span)
+    val conflicts = if (durationSet) BackfillRules.overlapping(records, taskId, span) else emptyList()
     val crosses = BackfillRules.crossesDay(span, zone)
-    val valid = span.minutes >= 1
+    val valid = durationSet
 
     val startZ = Instant.ofEpochMilli(span.startMillis).atZone(zone)
     val endZ = Instant.ofEpochMilli(span.endMillis).atZone(zone)
-    val preview = "%02d-%02d %02d:%02d → %s%02d:%02d（%s）".format(
-        startZ.monthValue, startZ.dayOfMonth, startZ.hour, startZ.minute,
-        if (crosses) "次日 " else "",
-        endZ.hour, endZ.minute,
-        formatMinutesHm(span.minutes),
-    )
+    val preview = if (durationSet) {
+        "%02d-%02d %02d:%02d → %s%02d:%02d（%s）".format(
+            startZ.monthValue, startZ.dayOfMonth, startZ.hour, startZ.minute,
+            if (crosses) "次日 " else "",
+            endZ.hour, endZ.minute,
+            formatMinutesCompact(span.minutes),
+        )
+    } else {
+        // 时长是 0：不要把"假区间"画出来，直接说要先做什么
+        "先选时长（结束 %02d:%02d 往前推），至少 1min".format(endHour, endMinute)
+    }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -269,12 +279,17 @@ fun BackfillDialog(
             }
             FieldRow(
                 label = "时长",
-                value = compactDuration(duration),
+                // 0 就写 0min：字段、滚轮、预览三处对同一个值用同一种写法
+                value = formatMinutesCompact(duration),
                 onClick = { picker = FieldPicker.DURATION },
             )
 
             Spacer(Modifier.height(10.dp))
-            Text(preview, fontSize = 12.sp, color = TextSecondary)
+            Text(
+                preview,
+                fontSize = 12.sp,
+                color = if (durationSet) TextSecondary else TextPlaceholder,
+            )
 
             if (conflicts.isNotEmpty()) {
                 Spacer(Modifier.height(6.dp))
@@ -285,7 +300,7 @@ fun BackfillDialog(
                     "该时段与已有 ${conflicts.size} 条记录重叠" +
                         "（%02d:%02d-%02d:%02d，%s），确认后会重复计入".format(
                             cs.hour, cs.minute, ce.hour, ce.minute,
-                            formatMinutesHm(first.minutes),
+                            formatMinutesCompact(first.minutes),
                         ),
                     fontSize = 12.sp,
                     color = WarningAmber,
@@ -335,11 +350,13 @@ fun BackfillDialog(
             title = "时长",
             initialMinutes = duration,
             maxTotalMinutes = BackfillRules.MAX_MINUTES,
-            summary = ::compactDuration,
+            // 摘要按实际分钟数写：0 时也要显示 0min，不能借用字段的「未设置」措辞
+            summary = { total -> formatMinutesCompact(total) },
             clampTo = BackfillRules.MAX_MINUTES,
-            clampNote = "最长 ${BackfillRules.MAX_MINUTES / 60} 小时，超出会按这个时长记录",
+            clampNote = "最长 ${BackfillRules.MAX_MINUTES / 60}h，超出会按这个时长记录",
             onDismiss = { picker = FieldPicker.NONE },
             onConfirm = { total ->
+                // 允许拨回 0（= 还没设），由「补录」按钮挡住提交；不在这里偷偷改成 1min
                 duration = total.coerceIn(0, BackfillRules.MAX_MINUTES)
                 picker = FieldPicker.NONE
             },
@@ -509,12 +526,4 @@ private fun TaskPickRow(
             Text("当前", fontSize = 11.sp, color = Primary)
         }
     }
-}
-
-/** 字段里的时长写法：3h / 3h30m / 45min —— 比 formatMinutesHm 紧凑，一行放得下 */
-private fun compactDuration(minutes: Int): String = when {
-    minutes <= 0 -> "未设置"
-    minutes % 60 == 0 -> "${minutes / 60}h"
-    minutes < 60 -> "${minutes}min"
-    else -> "${minutes / 60}h${minutes % 60}m"
 }

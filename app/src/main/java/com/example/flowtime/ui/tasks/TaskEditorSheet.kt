@@ -86,17 +86,21 @@ internal data class NewTaskDraft(
 )
 
 /**
- * 新建任务面板（底部弹层）。
+ * 任务面板（底部弹层）：新建 / 编辑共用。
  *
  * - 新建 = 新建一个任务，**默认未分类**；
  * - 选择「分类」（= 某个顶层任务）→ 归档成它下面的小任务；
- * - [fixedParent] 非空 = 从某个任务页进入，归属固定，不再显示分类选择。
+ * - [fixedParent] 非空 = 从某个任务页进入，归属固定，不再显示分类选择；
+ * - [editing] 非空 = 编辑既有任务（改名 / 换图标配色）。**改归属不在范围内**，
+ *   所以归属同样固定不显示选择器（改了要连带处理子任务层级，另说）。
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun TaskEditorSheet(
     /** 归属固定时（在某任务页里添加小任务）传入该任务 */
     fixedParent: FocusTask? = null,
+    /** 编辑既有任务时传入它 */
+    editing: FocusTask? = null,
     /** 可选的分类：顶层任务列表 */
     parentOptions: List<FocusTask> = emptyList(),
     defaultColorIndex: Int,
@@ -104,28 +108,46 @@ internal fun TaskEditorSheet(
     onDismiss: () -> Unit,
     onConfirm: (NewTaskDraft) -> Unit,
 ) {
-    var name by remember { mutableStateOf("") }
-    var colorIndex by remember { mutableIntStateOf(defaultColorIndex % TaskCardPalette.size) }
-    var iconIndex by remember { mutableIntStateOf(defaultIconIndex % TaskIcons.size) }
-    var pickedParentId by remember { mutableStateOf<String?>(fixedParent?.id) }
+    // 按 id 而不是按对象认：Room 的 tasks Flow 每次失效都会重建任务实例，
+    // 按对象认的话在编辑过程中打字会把输入框重置回原值
+    var name by remember(editing?.id) { mutableStateOf(editing?.name.orEmpty()) }
+    var colorIndex by remember(editing?.id) {
+        mutableIntStateOf((editing?.colorIndex ?: defaultColorIndex) % TaskCardPalette.size)
+    }
+    var iconIndex by remember(editing?.id) {
+        mutableIntStateOf((editing?.iconIndex ?: defaultIconIndex) % TaskIcons.size)
+    }
+    var pickedParentId by remember(editing?.id) {
+        mutableStateOf(fixedParent?.id ?: editing?.parentId)
+    }
     var parentMenuOpen by remember { mutableStateOf(false) }
     var confirmDiscard by remember { mutableStateOf(false) }
 
-    val showParentPicker = fixedParent == null
+    val showParentPicker = fixedParent == null && editing == null
     val parentName = fixedParent?.name
         ?: parentOptions.firstOrNull { it.id == pickedParentId }?.name
     val valid = name.isNotBlank()
-    val sheetState = rememberModalBottomSheetState(
-        skipPartiallyExpanded = true,
-        // 已经敲了名字、却用手势或返回键关掉时先拦一次并确认，避免草稿被静默丢弃
-        confirmValueChange = { value ->
-            if (value == SheetValue.Hidden && name.isNotBlank()) {
+    // 编辑态下名字一开始就是非空的，所以"有没有改过"得跟原值比，不能只看空不空
+    val editingName = editing?.name ?: ""
+    // 🔴 M3 1.4.0 把 confirmValueChange 当作 rememberSaveable 的 **key**（SheetDefaults.kt:519-521），
+    //    闭包只要捕获"值"（dirty 这种 val），值一变就换新闭包 → key 变 → SheetState 被重建
+    //    （新状态从 Hidden 起步），随后 ModalBottomSheet 的 LaunchedEffect(sheetState) show()
+    //    又把弹层顶回来 —— 观感就是"打字打进去、弹窗消失又浮上来"。
+    //    所以闭包里只读 name 这个 State（对象恒定），并把闭包本身 remember 住。
+    val confirmValueChange = remember(editingName) {
+        { value: SheetValue ->
+            // 改了名字却没保存就用手势/返回键关掉时先拦一次，避免修改被静默丢弃
+            if (value == SheetValue.Hidden && name.trim() != editingName) {
                 confirmDiscard = true
                 false
             } else {
                 true
             }
-        },
+        }
+    }
+    val sheetState = rememberModalBottomSheetState(
+        skipPartiallyExpanded = true,
+        confirmValueChange = confirmValueChange,
     )
 
     ModalBottomSheet(
@@ -134,6 +156,9 @@ internal fun TaskEditorSheet(
         containerColor = PaperElevated,
     ) {
         com.example.flowtime.ui.components.BlurDialogBehind(26.dp)
+        // 语音输入时键盘会换成一块接近全屏的面板，不钳制的话 M3 弹层会被压成 0 高、
+        // 先消失再弹回来（见 KeepSheetAboveIme 的注释）
+        com.example.flowtime.ui.components.KeepSheetAboveIme()
         Column(Modifier.fillMaxWidth().padding(horizontal = Dimens.ScreenPadding)) {
             Column(
                 modifier = Modifier
@@ -141,7 +166,7 @@ internal fun TaskEditorSheet(
                     .verticalScroll(rememberScrollState()),
             ) {
                 Text(
-                    text = "新建任务",
+                    text = if (editing != null) "编辑任务" else "新建任务",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Medium,
                     color = TextPrimary,
@@ -345,7 +370,11 @@ internal fun TaskEditorSheet(
                     shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Primary),
                 ) {
-                    Text("创建", fontSize = 15.sp, fontWeight = FontWeight.Light)
+                    Text(
+                        if (editing != null) "保存" else "创建",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Light,
+                    )
                 }
             }
             Spacer(Modifier.height(20.dp))

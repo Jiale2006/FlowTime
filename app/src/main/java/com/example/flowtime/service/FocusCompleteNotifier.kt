@@ -9,6 +9,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.example.flowtime.MainActivity
 import com.example.flowtime.R
+import com.example.flowtime.ui.components.formatMinutesCompact
 
 /**
  * 专注自然结束的完成通知。
@@ -25,8 +26,8 @@ object FocusCompleteNotifier {
         post(
             context = context,
             title = "专注完成",
-            text = "「$taskName」 · $minutes 分钟",
-            bigText = "「$taskName」 · $minutes 分钟，休息一下吧",
+            text = "「$taskName」 · ${formatMinutesCompact(minutes)}",
+            bigText = "「$taskName」 · ${formatMinutesCompact(minutes)}，休息一下吧",
         )
     }
 
@@ -39,11 +40,15 @@ object FocusCompleteNotifier {
         breakMinutes: Int,
         longBreak: Boolean,
     ) {
-        val breakLabel = if (longBreak) "长休息 $breakMinutes 分钟" else "休息 $breakMinutes 分钟"
+        val breakLabel = if (longBreak) {
+            "长休息 ${formatMinutesCompact(breakMinutes)}"
+        } else {
+            "休息 ${formatMinutesCompact(breakMinutes)}"
+        }
         post(
             context = context,
             title = "番茄专注完成",
-            text = "「$taskName」 · 第 $round/$totalRounds 轮 · $focusMinutes 分钟",
+            text = "「$taskName」 · 第 $round/$totalRounds 轮 · ${formatMinutesCompact(focusMinutes)}",
             bigText = "「$taskName」 · 第 $round/$totalRounds 轮结束，$breakLabel",
         )
     }

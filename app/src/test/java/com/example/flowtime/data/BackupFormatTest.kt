@@ -22,6 +22,7 @@ class BackupFormatTest {
         avatarPath = "avatar_123.jpg",
         defaultDurationMinutes = 90,
         taskListView = true,
+        freeFocusOrder = 3,
         ringtoneEnabled = false,
         autoStart = false,
         dailyGoalMinutes = 240,
@@ -36,12 +37,13 @@ class BackupFormatTest {
         themeMode = "WATERCOLOR",
     )
 
-    /** 与 [customized] 在 16 个字段上全都不同——用来验证"每一项都真的从 JSON 读" */
+    /** 与 [customized] 在 17 个字段上全都不同——用来验证"每一项都真的从 JSON 读" */
     private val anotherSet = AppSettings(
         nickname = "另一个人",
         avatarPath = "other.png",
         defaultDurationMinutes = 5,
         taskListView = false,
+        freeFocusOrder = 0,
         ringtoneEnabled = true,
         autoStart = true,
         dailyGoalMinutes = 30,
@@ -77,7 +79,7 @@ class BackupFormatTest {
     // ---- 设置：往返与哨兵 ----
 
     @Test
-    fun `设置 16 项往返全等`() {
+    fun `设置 17 项往返全等`() {
         val json = BackupFormat.settingsToJson(customized)
         // 换两个完全不同的 base 各读一次：任何一项忘了从 JSON 取，
         // 结果就会是 base 的对应值，这里立刻红
@@ -86,7 +88,7 @@ class BackupFormatTest {
     }
 
     @Test
-    fun `设置字段数是 16——加字段忘了同步时这条会红`() {
+    fun `设置字段数是 17——加字段忘了同步时这条会红`() {
         assertEquals(
             BackupFormat.SETTINGS_FIELD_COUNT,
             BackupFormat.settingsToJson(AppSettings()).length(),
@@ -96,7 +98,7 @@ class BackupFormatTest {
     @Test
     fun `设置字段名与预期一致——改名或漏写时这条会红`() {
         val expected = setOf(
-            "nickname", "avatarPath", "defaultDurationMinutes", "taskListView",
+            "nickname", "avatarPath", "defaultDurationMinutes", "taskListView", "freeFocusOrder",
             "ringtoneEnabled", "autoStart", "dailyGoalMinutes", "reminderTime",
             "reminderEnabled", "pomodoroFocusMinutes", "pomodoroBreakMinutes",
             "pomodoroLongBreakMinutes", "pomodoroRoundsBeforeLongBreak",

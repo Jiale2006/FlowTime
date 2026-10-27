@@ -131,6 +131,38 @@ fun ProCard(
                 Box { content() }
             }
         }
+        ThemeMode.IMPERIAL -> {
+            // 宫廷御制：深漆实体卡（#14211F @90%，禁 backdrop-blur）+ 描金发丝边
+            // + 方向性光：顶边受光高光 / 底边背光暗缘 / 外层深影（光才有方向）。
+            // 刻意不加回纹角：卡片数量多时逐卡四角描线会抢戏，提示词也只是"可选"。
+            Box(modifier.softShadow(shape, 12.dp).clip(shape)) {
+                Box(Modifier.matchParentSize().background(color))
+                Box(
+                    Modifier.matchParentSize().background(
+                        Brush.verticalGradient(
+                            colors = listOf(Color(0x1AF0E6D2), Color.Transparent),
+                        ),
+                    ),
+                )
+                Box(
+                    Modifier.matchParentSize().background(
+                        Brush.verticalGradient(
+                            colorStops = arrayOf(
+                                0.97f to Color.Transparent,
+                                1f to Color(0x73020505),
+                            ),
+                        ),
+                    ),
+                )
+                Surface(
+                    modifier = Modifier.matchParentSize(),
+                    shape = shape,
+                    color = Color.Transparent,
+                    border = BorderStroke(1.dp, BorderColor),
+                ) {}
+                Box { content() }
+            }
+        }
         ThemeMode.WATERCOLOR, ThemeMode.MONO -> {
             // 浅色纸面通用材质：实心底 + 细描边 + 扩散阴影。
             // 阴影强度由各自调色板的 shadowAmbient/SpotAlpha 决定

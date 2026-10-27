@@ -19,7 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -88,11 +88,40 @@ private fun LazyListState.centeredIndex(): Int {
 }
 
 /**
+ * 循环滚轮把整列铺多少遍。奇数：初始停在正中间那一圈，两边各留一半可以往前/往后滑，
+ * 正常使用根本滑不到头（60 项 × 201 圈 = 12060 项，LazyColumn 只组合可见的几行）。
+ */
+private const val CyclicCycles = 201
+
+/** 绝对下标 → 该列里的值下标（循环模式） */
+private fun valueAt(index: Int, count: Int): Int = ((index % count) + count) % count
+
+/**
+ * 值下标 → 离 [near] 最近的绝对下标（循环模式）。
+ *
+ * 🔴 必须取最近的一圈：外部改值（确定时被 clamp、切换任务重置默认时长）时
+ *    直接 `animateScrollToItem(safeIndex)` 会从第 100 圈跨回第 0 圈，
+ *    用户看到的就是"滚轮无缘无故飞了几百行"。
+ */
+private fun nearestIndexOf(value: Int, near: Int, count: Int): Int {
+    val cycleStart = near - valueAt(near, count)
+    val target = cycleStart + value
+    return when {
+        target - near > count / 2 -> target - count
+        near - target > count / 2 -> target + count
+        else -> target
+    }
+}
+
+/**
  * 竖向滚轮列（iOS 风）：惯性滑动 + 自动吸附到整行，中心高亮带由 [WheelSelectionBand] 负责。
  * 只做「值」，配色/选中带交给调用方，这样一排滚轮能共用一条选中带。
  *
  * 顶部/底部渐隐遮罩由 [fadeColor] 控制（传所在容器的底色即可叠出淡出效果；
  * 传 null 则不加遮罩）。
+ *
+ * [cyclic] = true 时整列铺 [CyclicCycles] 遍，用户在任意位置都能继续往上/往下拨：
+ * 时长的小时列 00 的上面是 maxHours（24h 场景就是 24），分钟列 00 的上面是 59。
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -104,23 +133,31 @@ fun WheelColumn(
     itemHeight: Dp = WheelItemHeight,
     visibleCount: Int = WheelVisibleCount,
     fadeColor: Color? = null,
+    /** 循环滚轮：00 的上面是 59（时长的小时列是 24），滑到哪一边都不会撞墙 */
+    cyclic: Boolean = false,
 ) {
     if (items.isEmpty()) return
+    val count = items.size
     val safeIndex = selectedIndex.coerceIn(0, items.lastIndex)
+    val totalCount = if (cyclic) count * CyclicCycles else count
+    val initialIndex = if (cyclic) count * (CyclicCycles / 2) + safeIndex else safeIndex
     // 上下各有 2 行的 contentPadding：滚轮视口的"内容起点"就是正中选中带，
-    // 所以初始/滚动目标直接用 safeIndex（实测：LazyList 把目标项摆在 padding
+    // 所以初始/滚动目标直接用 initialIndex（实测：LazyList 把目标项摆在 padding
     // 内沿=中心带；再减 2 会让默认值停在带子上方两格）
-    val listState = rememberLazyListState(initialFirstVisibleItemIndex = safeIndex)
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
     val fling = rememberSnapFlingBehavior(listState, SnapPosition.Center)
     // 反馈回调用的始终是最新 lambda，避免把 onIndexChange 记进 snapshotFlow 的 key
     val latestOnChange by rememberUpdatedState(onIndexChange)
     val haptic = LocalHapticFeedback.current
 
-    // 外部改了选中项（如切换日期时重置时刻）→ 平滑滚到位；用户正在滑时不抢方向盘
-    LaunchedEffect(safeIndex) {
+    // 外部改了选中项（如切换日期时重置时刻）→ 平滑滚到位；用户正在滑时不抢方向盘。
+    // 循环模式下目标取**离当前位置最近**的那一圈（见 [nearestIndexOf]）。
+    LaunchedEffect(safeIndex, count, cyclic) {
         if (!listState.isScrollInProgress) {
-            if (listState.firstVisibleItemIndex != safeIndex || listState.firstVisibleItemScrollOffset != 0) {
-                listState.animateScrollToItem(safeIndex, 0)
+            val current = listState.firstVisibleItemIndex
+            val target = if (cyclic) nearestIndexOf(safeIndex, current, count) else safeIndex
+            if (current != target || listState.firstVisibleItemScrollOffset != 0) {
+                listState.animateScrollToItem(target, 0)
             }
         }
     }
@@ -133,12 +170,14 @@ fun WheelColumn(
     // 直接回写会把调用方的初值（如默认 45）吞成 0——必须等到
     // "读到初始项"或"用户真的开始滑"之后才开始回报。
     val initialSafeIndex = safeIndex
-    LaunchedEffect(listState, items.size) {
+    LaunchedEffect(listState, count, cyclic) {
         var lastHapticIndex = -1
         var primed = false
         snapshotFlow { Pair(listState.centeredIndex(), listState.isScrollInProgress) }
-            .collect { (index, scrolling) ->
-                if (index < 0) return@collect
+            .collect { (absIndex, scrolling) ->
+                if (absIndex < 0) return@collect
+                // 循环模式下回报的是**值**，不是绝对下标（绝对下标会跑到几千）
+                val index = if (cyclic) valueAt(absIndex, count) else absIndex
                 if (!primed) {
                     if (index == initialSafeIndex || scrolling) primed = true
                     return@collect
@@ -147,7 +186,7 @@ fun WheelColumn(
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 }
                 lastHapticIndex = index
-                latestOnChange(index.coerceIn(0, items.lastIndex))
+                latestOnChange(index)
             }
     }
 
@@ -168,8 +207,9 @@ fun WheelColumn(
             horizontalAlignment = Alignment.CenterHorizontally,
             flingBehavior = fling,
         ) {
-            itemsIndexed(items, key = { _, index -> index }) { index, text ->
-                val selected = index == safeIndex
+            items(count = totalCount, key = { index -> index }) { index ->
+                val value = if (cyclic) valueAt(index, count) else index
+                val selected = value == safeIndex
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -178,12 +218,12 @@ fun WheelColumn(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
                         ) {
-                            if (index != safeIndex) scope.launch { listState.animateScrollToItem(index) }
+                            if (value != safeIndex) scope.launch { listState.animateScrollToItem(index) }
                         },
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
-                        text = text,
+                        text = items[value],
                         fontSize = 20.sp,
                         fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
                         color = if (selected) TextPrimary else TextPrimary.copy(alpha = 0.32f),
@@ -224,6 +264,10 @@ private const val MINUTES_PER_DAY = 24 * 60
  *
  * **组件不做任何上限钳制**：小时列 0..maxHours、分钟列固定 0..59，随便拨。
  *
+ * **两列都是循环的**（2026-10-25 他要的）：分钟 00 的上面是 59，小时 00 的上面是 maxHours
+ * （时长场景上限 24h，但小时列只到 23 —— 见 [maxHours]。好处是回 00 只需往上拨一格，
+ * 不用从 59 一路滚回 0。
+ *
  * 为什么不做（两次都栽在这上面）：
  * - 第一版让两列互相当对方的"上限"（`hourMax` 依赖分钟、`minuteMax` 依赖小时）：
  *   分钟停在 30 时拨小时到 8，小时列会从 0..8 缩成 0..7，**刚拨上去的 8 被静默顶回 7**；
@@ -244,9 +288,14 @@ fun HourMinuteWheel(
     columnWidth: Dp = 72.dp,
     fadeColor: Color? = null,
 ) {
-    val maxHours = (maxTotalMinutes / 60).coerceIn(0, 24)
+    // 小时列最高 23，**不出现 24**（用户定稿）：上限 24h 由「23h 59min」表达。
+    // 之前这里是 maxTotalMinutes / 60，于是倒计时能拨到 24、补录时刻列只有 0..23，
+    // 两套循环数组视觉对不上（他说"补录和倒计时不一样"就是这 1 项之差）。
+    val maxHours = ((maxTotalMinutes - 1) / 60).coerceIn(0, 23)
     val h = hours.coerceIn(0, maxHours)
-    val m = minutes.coerceIn(0, 59)
+    // 旧数据里真有 1440（24h00）时，落到 23 那一档会把分钟也吞成 0 →
+    // 改成 23h59，至少不会静默少一小时。UI 已经拨不出 1440，只剩迁移/备份的存量。
+    val m = if (hours > maxHours) 59 else minutes.coerceIn(0, 59)
     val hourItems = remember(maxHours) { (0..maxHours).map { "%02d".format(it) } }
     val minuteItems = remember { (0..59).map { "%02d".format(it) } }
 
@@ -263,9 +312,10 @@ fun HourMinuteWheel(
                 onIndexChange = { picked -> onChange(picked, m) },
                 modifier = Modifier.width(columnWidth),
                 fadeColor = fadeColor,
+                cyclic = true,
             )
             Spacer(Modifier.width(6.dp))
-            Text("小时", fontSize = 13.sp, color = TextSecondary.copy(alpha = 0.9f))
+            Text("h", fontSize = 13.sp, color = TextSecondary.copy(alpha = 0.9f))
             Spacer(Modifier.width(18.dp))
             WheelColumn(
                 items = minuteItems,
@@ -273,9 +323,10 @@ fun HourMinuteWheel(
                 onIndexChange = { picked -> onChange(h, picked) },
                 modifier = Modifier.width(columnWidth),
                 fadeColor = fadeColor,
+                cyclic = true,
             )
             Spacer(Modifier.width(6.dp))
-            Text("分钟", fontSize = 13.sp, color = TextSecondary.copy(alpha = 0.9f))
+            Text("min", fontSize = 13.sp, color = TextSecondary.copy(alpha = 0.9f))
         }
     }
 }

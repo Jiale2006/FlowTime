@@ -84,7 +84,9 @@ import com.example.flowtime.ui.components.RingTimer
 import com.example.flowtime.ui.components.pressScale
 import com.example.flowtime.ui.components.rememberAmbientParticlesState
 import com.example.flowtime.ui.components.rememberReducedMotion
-import com.example.flowtime.ui.components.formatMinutesHm
+import com.example.flowtime.ui.components.formatMinutesCompact
+import com.example.flowtime.ui.components.formatMinSecCompact
+import com.example.flowtime.ui.components.formatClockHms
 import com.example.flowtime.ui.records.BackfillDialog
 import com.example.flowtime.ui.records.RecordUndoBar
 import com.example.flowtime.ui.theme.ActivePalette
@@ -124,7 +126,6 @@ private fun BoxScope.TimerRingSection(
     timerState: State<AppViewModel.TimerState>,
     isIdle: Boolean,
     reducedMotion: Boolean,
-    frozenPaintingP: MutableFloatState,
     controlPressed: Boolean,
     /** 当前时间的精确毫秒值（含 tick 间外推），用于把翻页对齐到真实秒边界 */
     nowMillis: () -> Long,
@@ -164,23 +165,26 @@ private fun BoxScope.TimerRingSection(
     } else {
         (displayMillis / 1000L).toInt()
     }
-    // 「芦苇河」画作：显影曲线**三种模式统一**（2026-10-24 他要求"参照正计时"），
-    // 用四次方根做「前紧后松」：开场就显影 31%、15 分钟 ≈7 成、半程 ≈84%。
-    // 原来倒计时/番茄走 focusFrac×2（前半程从 0 慢慢洇开），画作上会有一层显影遮罩
-    // 明显盖很久；正计时因为开场就显影大半，看起来"没有遮盖"——两条曲线并存的观感不一致。
-    // 后半程芦苇逐支随风摆动。时间线 focusFrac = 真实进度：
-    // 倒计时/番茄专注段 = elapsed/total；正计时 = elapsed/虚拟1小时（封顶，走满触发钤印）；
-    // 番茄休息段冻结；待机显示整画幻影（低透明度预告"专注会画出什么"）。
-    var focusFrac = when {
+    // 「芦苇河」画作：**不再按进度显影**（2026-10-25 他要求"那层遮挡物不要设置透明度了"）。
+    // 原来倒计时/番茄的前半程，整幅画被一层白雾盖着（显影遮罩），等于一直在"洗"这张画。
+    // 现在整幅画从第一秒起就完整显示，随时间变化的只剩两件事：
+    //   过半 → 芦苇随风摆（windActive）；走满 → 朱红钤印（paintingCompleted）。
+    // focusFrac 仍是真实进度，只用来驱动这两件事：
+    // 倒计时/番茄专注段 = elapsed/total；正计时 = elapsed/虚拟1小时（封顶）；待机 = 1。
+    val focusFrac = when {
         timer.mode == AppViewModel.TimerMode.COUNT_UP ->
             (timer.elapsedMillis / COUNT_UP_PAINT_TOTAL_MS.toFloat()).coerceIn(0f, 1f)
         isIdle -> 1f
         else -> 1f - timer.progress
     }
-    var paintingP = Math.sqrt(Math.sqrt(focusFrac.toDouble())).toFloat()
-    if (timer.inBreak) paintingP = frozenPaintingP.floatValue
-    if (!isIdle && !timer.inBreak) frozenPaintingP.floatValue = paintingP
-    // 钤印只认走满（与显影解耦，显影在半程就到 1 了）
+    // 显影节奏（2026-10-25 重做）：整幅画一开始被湿气完全挡住，随专注一点点洇开，
+    // 到 80% 时全部显完、之后画面"晒干"。曲线 1-(1-u)^2.2：前段退得快（开场就能看到画），
+    // 后段极慢地收尾 —— 这样"遮挡"存在感最低，"化开"的过程最长。
+    // 番茄休息段冻结（休息不算专注，画面不该继续变化）。
+    val frozenReveal = remember { mutableFloatStateOf(0f) }
+    var revealP = 1f - Math.pow(1.0 - focusFrac, 2.2).toFloat()
+    if (timer.inBreak) revealP = frozenReveal.floatValue
+    if (!isIdle && !timer.inBreak) frozenReveal.floatValue = revealP
     val paintingCompleted = focusFrac >= 1f && !isIdle
     val modeLabel = when {
         timer.inBreak -> "番茄计时 · 休息中 · 第 ${timer.round} 轮已完成"
@@ -196,7 +200,7 @@ private fun BoxScope.TimerRingSection(
             focusFrac >= 0.5f && timer.phase != AppViewModel.TimerPhase.PAUSED
         Box {
             ReedPaintingTimer(
-                progress = paintingP,
+                progress = revealP,
                 timeText = formatClock(displayMillis),
                 modeLabel = modeLabel,
                 // 方案 B：画作左右铺满，纵向也吃满 weight 区（原先 0.94 的留白会削弱放大效果）
@@ -229,6 +233,8 @@ private fun BoxScope.TimerRingSection(
             //    **椭圆环**、翻牌卡片也偏离环心（2026-10-24 网格测量实测）。
             //    改成"宽定高"：环 = 0.92×屏宽 的正圆。
             modifier = Modifier.fillMaxWidth(0.92f).aspectRatio(1f),
+            // 宫廷御制：计时数字是"关键数字"，按提示词用鎏金（Primary 就是鎏金）
+            timeColor = if (ActivePalette.mode == ThemeMode.IMPERIAL) Primary else TextPrimary,
             dimmed = timer.phase == AppViewModel.TimerPhase.PAUSED,
             centerContent = if (!isIdle) {
                 {
@@ -271,6 +277,8 @@ fun TimerScreen(
         }
     }
     val tasks by viewModel.tasks.collectAsStateWithLifecycle()
+    // 选择器只列“在进行”的任务：归档了就不该还能选到（否则归档等于没做）
+    val activeTasks by viewModel.activeTasks.collectAsStateWithLifecycle()
     val completed by viewModel.completedRecord.collectAsStateWithLifecycle()
     val selectedDuration by viewModel.selectedDurationMinutes.collectAsStateWithLifecycle()
     val categories by viewModel.categories.collectAsStateWithLifecycle()
@@ -281,8 +289,6 @@ fun TimerScreen(
     val reducedMotion = rememberReducedMotion()
     val isWatercolor = ActivePalette.mode == ThemeMode.WATERCOLOR
     val ambient = rememberAmbientParticlesState()
-    // 「芦苇河」显影进度在番茄休息段冻结（休息不算专注，画不生长）
-    val frozenPaintingP = remember { mutableFloatStateOf(0f) }
     // 环形计时器按屏高自适应，尽量让待机页一屏放下（小屏才需要轻微滚动）
     val screenHeightDp = LocalConfiguration.current.screenHeightDp
     val screenWidthDp = LocalConfiguration.current.screenWidthDp
@@ -361,9 +367,10 @@ fun TimerScreen(
                     ) {
                         Text(
                             text = if (mode == AppViewModel.TimerMode.POMODORO) {
+                                // 番茄节奏也用同一套单位词：25+5min
                                 "${settings.pomodoroFocusMinutes}+${settings.pomodoroBreakMinutes}min"
                             } else {
-                                durationLabel(selectedDuration)
+                                formatMinutesCompact(selectedDuration)
                             },
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Light,
@@ -425,6 +432,10 @@ fun TimerScreen(
                     )
                 }
             }
+            // 「取消本轮」与上面两个按钮之间留出空气（2026-10-25 他要求"距离远一点"）。
+            // 原来只靠 TextButton 自身的 48dp 触控高度撑开，文字离按钮只有约 10dp，
+            // 视觉上像按钮的附注；误触由「取消计时」确认弹窗兜底，这里纯粹是排版呼吸。
+            Spacer(Modifier.height(20.dp))
             TextButton(
                 onClick = {
                     localView.hapticTick()
@@ -619,7 +630,6 @@ fun TimerScreen(
                     timerState = timerState,
                     isIdle = isIdle,
                     reducedMotion = reducedMotion,
-                    frozenPaintingP = frozenPaintingP,
                     controlPressed = controlPressed,
                     nowMillis = viewModel::currentDisplayMillis,
                 )
@@ -664,7 +674,7 @@ fun TimerScreen(
         // 只停留 1 秒——补录是“告知”不是“反悔”，写错了回收站也能找回
         RecordUndoBar(
             visible = lastAdded != null,
-            message = "已补录 ${formatMinutesHm(lastAdded?.minutes ?: 0)}",
+            message = "已补录 ${formatMinutesCompact(lastAdded?.minutes ?: 0)}",
             seconds = 1,
             onUndo = {
                 lastAdded?.let { viewModel.deleteRecord(it) }
@@ -752,7 +762,7 @@ fun TimerScreen(
                 if (pickerMinutes > BackfillRules.MAX_MINUTES) {
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "最长 ${BackfillRules.MAX_MINUTES / 60} 小时，超出会按这个时长记录",
+                        "最长 ${BackfillRules.MAX_MINUTES / 60}h，超出会按这个时长记录",
                         fontSize = 11.sp,
                         color = WarningAmber,
                     )
@@ -787,7 +797,7 @@ fun TimerScreen(
                         colors = ButtonDefaults.buttonColors(containerColor = Primary),
                     ) {
                         Text(
-                            "开始 ${durationLabel(picked)} 倒计时",
+                            "开始 ${formatMinutesCompact(picked)} 倒计时",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Light,
                         )
@@ -813,8 +823,8 @@ fun TimerScreen(
                 Text("番茄计时", fontSize = 16.sp, color = TextPrimary)
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "${settings.pomodoroFocusMinutes} 分钟专注 → ${settings.pomodoroBreakMinutes} 分钟休息，" +
-                        "每 ${settings.pomodoroRoundsBeforeLongBreak} 轮进入 ${settings.pomodoroLongBreakMinutes} 分钟长休息，" +
+                    "${formatMinutesCompact(settings.pomodoroFocusMinutes)} 专注 → ${formatMinutesCompact(settings.pomodoroBreakMinutes)} 休息，" +
+                        "每 ${settings.pomodoroRoundsBeforeLongBreak} 轮进入 ${formatMinutesCompact(settings.pomodoroLongBreakMinutes)} 长休息，" +
                         "自动循环，专注段结束自动记录并响铃。",
                     fontSize = 13.sp,
                     color = TextSecondary,
@@ -851,37 +861,9 @@ fun TimerScreen(
                         .heightIn(max = 400.dp)
                         .verticalScroll(rememberScrollState()),
                 ) {
-                // 自由专注：不绑定任务，记录归未分类（选中态=整行底色加深，不打勾）
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(ActivePalette.buttonShape)
-                        .background(if (task == null) CardGreenLight else Color.Transparent)
-                        .clickable {
-                            viewModel.selectFreeFocus()
-                            showTaskPicker = false
-                        }
-                        .padding(vertical = 12.dp, horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(32.dp)
-                            .clip(ActivePalette.badgeShape)
-                            .background(MutedSurface),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        TaskIcons.Glyph(TaskIcons.FREE_FOCUS_INDEX, size = 22.dp)
-                    }
-                    Spacer(Modifier.width(12.dp))
-                    Text(
-                        "自由专注",
-                        fontSize = 16.sp,
-                        color = TextPrimary,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                tasks.forEach { item ->
+                // 不再单独插一行「自由专注」：它本身就是库里的真任务行，
+                // 跟别的一起按手动顺序排，才不会出现两个「专注」、也不会跟任务清单对不上
+                activeTasks.forEach { item ->
                     val (cardColor, _) = TaskCardPalette[item.colorIndex % TaskCardPalette.size]
                     val selected = item.id == task?.id
                     Row(
@@ -991,17 +973,9 @@ private fun ModeSelector(
     }
 }
 
-/** 时长标签：与需求一致的 30min / 45min / 1h / 1.5h / 2h / 2.5h 写法 */
-/**
- * 时长文案：45min / 1h / 1.5h / 2h30m。
- * 上限提到 24h 后必须能正确写出整小时——否则按钮会显示"开始 1440min 倒计时"。
- */
-private fun durationLabel(minutes: Int): String = when {
-    minutes < 60 -> "${minutes}min"
-    minutes % 60 == 0 -> "${minutes / 60}h"
-    minutes % 30 == 0 -> "${minutes / 60}.5h"
-    else -> "${minutes / 60}h${minutes % 60}m"
-}
+// 🔴 原来这里有一个 durationLabel()：45min / 1h / 1.5h / 2h30m ——
+//    和统计页的 "30 min"、回收站的 "2 小时前"、补录弹窗的 "3h30m" 各写各的。
+//    2026-10-25 全部收进 formatMinutesCompact()（ui/components/Format.kt），全站统一 `h` / `min`。
 
 /** 这个时长从此刻起会不会跨过午夜（跨天时预览要标"次日"、警告要变色） */
 private fun durationCrossesDay(minutes: Int): Boolean {
@@ -1029,7 +1003,7 @@ private fun durationPreviewText(minutes: Int): String {
         "次日 %02d:%02d".format(end.hour, end.minute)
     }
     return "现在 %02d:%02d → %s 结束（%s）".format(
-        start.hour, start.minute, endText, durationLabel(minutes),
+        start.hour, start.minute, endText, formatMinutesCompact(minutes),
     )
 }
 
@@ -1052,16 +1026,16 @@ private fun View.hapticConfirm() {
     )
 }
 
-private fun formatClock(millis: Long): String {
-    val totalSeconds = (millis + 999) / 1000
-    val m = totalSeconds / 60
-    val s = totalSeconds % 60
-    return "${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}"
-}
+/**
+ * 计时显示：**始终**是 `时:分:秒`（2026-10-25 他定：所有主题统一）。
+ *
+ * 实现收到 [formatClockHms]（ui/components/Format.kt）—— 通知里那份也用它，
+ * 避免两边再次分叉（曾出现玻璃 `1:59:45` / 涂鸦 `119:45` 两套格式）。
+ */
+private fun formatClock(millis: Long): String = formatClockHms((millis + 999) / 1000)
 
+/** 取消计时弹窗里的"已计时 X"：和全站时长文案同一套 `12min 30s` */
 private fun formatElapsed(millis: Long): String {
     val totalSeconds = millis / 1000
-    val m = totalSeconds / 60
-    val s = totalSeconds % 60
-    return "$m 分 ${s.toString().padStart(2, '0')} 秒"
+    return formatMinSecCompact((totalSeconds / 60).toInt(), (totalSeconds % 60).toInt())
 }

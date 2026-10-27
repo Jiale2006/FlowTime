@@ -31,9 +31,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -50,10 +53,11 @@ import com.example.flowtime.data.RecordLink
 import com.example.flowtime.data.StatsRules
 import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.components.ProCard
-import com.example.flowtime.ui.components.formatMinutesHm
+import com.example.flowtime.ui.components.formatMinutesCompact
 import com.example.flowtime.ui.theme.ActivePalette
 import com.example.flowtime.ui.theme.CardGreenLight
 import com.example.flowtime.ui.theme.Dimens
+import com.example.flowtime.ui.theme.ErrorRed
 import com.example.flowtime.ui.theme.PaperElevated
 import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.TextPlaceholder
@@ -84,22 +88,44 @@ fun AllRecordsScreen(
     val tasks by viewModel.tasks.collectAsStateWithLifecycle()
     val zone = remember { ZoneId.systemDefault() }
 
+    // 「自由专注」是虚拟任务（不落库，见 FocusTask.freeFocus）。任务详情页的
+    // 「查看更多记录」把它的 id 传进来，这里必须现场造一个 —— 原来只去 tasks 表里查，
+    // 查不到就退化成"全部"（chip 还显示「任务：全部」），第 11 条以后的自由专注记录
+    // 等于没有入口（2026-10-25 修）。
+    val hasFreeRecords = records.any { it.taskId == null }
+    val pickerTasks = remember(tasks, hasFreeRecords) {
+        // 「自由专注」现在是真任务行；只有老数据里它还没落库时才补一个聚合入口
+        if (hasFreeRecords && tasks.none { it.isFreeFocus }) tasks + FocusTask.freeFocus() else tasks
+    }
+
     var selectedTaskId by remember(initialTaskId) { mutableStateOf<String?>(initialTaskId) }
     var hourPreset by remember { mutableStateOf(StatsRules.HourPreset.ALL) }
     var taskPickerOpen by remember { mutableStateOf(false) }
     var hourMenuOpen by remember { mutableStateOf(false) }
     var editingRecord by remember { mutableStateOf<FocusRecord?>(null) }
-    var deletedRecord by remember { mutableStateOf<FocusRecord?>(null) }
+    /** 刚删除的（一批）记录：撤销条按整批恢复 */
+    var deletedRecords by remember { mutableStateOf<List<FocusRecord>>(emptyList()) }
 
-    val filtered = remember(records, tasks, selectedTaskId, hourPreset) {
-        val task = tasks.firstOrNull { it.id == selectedTaskId }
-        val belongs = task?.let { RecordLink.treePredicate(it, tasks) } ?: { _: FocusRecord -> true }
+    // 多选模式（右上角「编辑」）：清一批误记录时不用长按几十次
+    var selectionMode by remember { mutableStateOf(false) }
+    val selectedIds = remember { mutableStateMapOf<Long, Boolean>() }
+
+    val selectedTask = remember(pickerTasks, selectedTaskId) {
+        selectedTaskId?.let { id -> pickerTasks.firstOrNull { it.id == id } }
+    }
+    val filtered = remember(records, tasks, selectedTask, hourPreset) {
+        val belongs = selectedTask?.let { RecordLink.treePredicate(it, tasks) }
+            ?: { _: FocusRecord -> true }
         records
             .filter { belongs(it) && StatsRules.inHourWindow(it, hourPreset.window, zone) }
             .sortedByDescending { it.endEpochMillis }
     }
-    val selectedTask = remember(tasks, selectedTaskId) {
-        selectedTaskId?.let { id -> tasks.firstOrNull { it.id == id } }
+    val allSelected = filtered.isNotEmpty() && selectedIds.size == filtered.size
+
+    // 记录被删 / 筛选变了之后，选中集合要跟着瘦身，否则计数虚高
+    LaunchedEffect(filtered) {
+        val live = filtered.mapTo(mutableSetOf()) { it.id }
+        selectedIds.keys.filter { it !in live }.forEach { selectedIds.remove(it) }
     }
     /** 活任务 id：记录挂着的任务不在这里面 = 任务已被删除（回收站里或已彻底删） */
     val liveTaskIds = remember(tasks) { tasks.mapTo(mutableSetOf()) { it.id } }
@@ -123,7 +149,21 @@ fun AllRecordsScreen(
                     "全部记录",
                     style = MaterialTheme.typography.titleLarge,
                     color = TextPrimary,
+                    modifier = Modifier.weight(1f),
                 )
+                if (filtered.isNotEmpty()) {
+                    TextButton(onClick = {
+                        selectionMode = !selectionMode
+                        if (!selectionMode) selectedIds.clear()
+                    }) {
+                        Text(
+                            if (selectionMode) "完成" else "编辑",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Primary,
+                        )
+                    }
+                }
             }
 
             Spacer(Modifier.height(12.dp))
@@ -167,10 +207,48 @@ fun AllRecordsScreen(
 
             Spacer(Modifier.height(8.dp))
             Text(
-                "${filtered.size} 条",
+                if (selectionMode) "已选 ${selectedIds.size} 项" else "${filtered.size} 条",
                 fontSize = 12.sp,
                 color = TextSecondary,
             )
+            if (selectionMode) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = {
+                        if (allSelected) {
+                            selectedIds.clear()
+                        } else {
+                            filtered.forEach { selectedIds[it.id] = true }
+                        }
+                    }) {
+                        Text(
+                            if (allSelected) "全不选" else "全选",
+                            fontSize = 13.sp,
+                            color = TextSecondary,
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    TextButton(
+                        onClick = {
+                            val picked = filtered.filter { selectedIds.containsKey(it.id) }
+                            if (picked.isEmpty()) return@TextButton
+                            deletedRecords = picked
+                            viewModel.deleteRecords(picked)
+                            selectedIds.clear()
+                        },
+                        enabled = selectedIds.isNotEmpty(),
+                    ) {
+                        Text(
+                            "移入回收站" + if (selectedIds.isNotEmpty()) " (${selectedIds.size})" else "",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (selectedIds.isNotEmpty()) ErrorRed else TextPlaceholder,
+                        )
+                    }
+                }
+            }
             Spacer(Modifier.height(8.dp))
 
             if (filtered.isEmpty()) {
@@ -205,8 +283,18 @@ fun AllRecordsScreen(
                                         taskDeleted = item.record.taskId?.let { it !in liveTaskIds } == true,
                                         onEditDuration = { editingRecord = item.record },
                                         onDelete = {
-                                            deletedRecord = item.record
+                                            deletedRecords = listOf(item.record)
                                             viewModel.deleteRecord(item.record)
+                                        },
+                                        selected = if (selectionMode) {
+                                            selectedIds.containsKey(item.record.id)
+                                        } else {
+                                            null
+                                        },
+                                        onToggleSelect = {
+                                            if (selectedIds.remove(item.record.id) == null) {
+                                                selectedIds[item.record.id] = true
+                                            }
                                         },
                                     )
                                     RecordDivider()
@@ -219,21 +307,27 @@ fun AllRecordsScreen(
         }
 
         RecordUndoBar(
-            visible = deletedRecord != null,
+            visible = deletedRecords.isNotEmpty(),
+            message = if (deletedRecords.size > 1) {
+                "已移入回收站（${deletedRecords.size} 条）"
+            } else {
+                "已移入回收站"
+            },
             accent = WarningAmber,
             seconds = 1,
             onUndo = {
-                deletedRecord?.let { viewModel.restoreRecord(it) }
-                deletedRecord = null
+                deletedRecords.forEach { viewModel.restoreRecord(it) }
+                deletedRecords = emptyList()
             },
-            onExpire = { deletedRecord = null },
+            onExpire = { deletedRecords = emptyList() },
             modifier = Modifier.align(Alignment.BottomCenter),
         )
     }
 
     if (taskPickerOpen) {
         TaskPickerSheet(
-            tasks = tasks,
+            // 含虚拟「自由专注」：没有它，记录页永远筛不到未分类那堆记录
+            tasks = pickerTasks,
             selectedTaskId = selectedTaskId,
             onPick = { picked ->
                 selectedTaskId = picked
@@ -437,6 +531,6 @@ private fun DayHeader(item: RecordListItem.DayHeader) {
             color = TextSecondary,
             modifier = Modifier.weight(1f),
         )
-        Text(formatMinutesHm(item.minutes), fontSize = 12.sp, color = Primary)
+        Text(formatMinutesCompact(item.minutes), fontSize = 12.sp, color = Primary)
     }
 }

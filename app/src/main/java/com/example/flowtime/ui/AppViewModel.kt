@@ -20,6 +20,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.flowtime.service.FocusCompleteNotifier
 import com.example.flowtime.service.FocusReminder
 import com.example.flowtime.service.FocusTimerService
+import com.example.flowtime.ui.components.formatClockHms
 import com.example.flowtime.data.AppSettings
 import com.example.flowtime.data.BackfillRules
 import com.example.flowtime.data.BackupFormat
@@ -50,6 +51,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.first
 import java.io.File
 import java.time.DayOfWeek
 import java.time.Instant
@@ -67,6 +70,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     val tasks: StateFlow<List<FocusTask>> =
         repo.tasks.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /**
+     * 未归档的任务 = “在进行的”。**只有清单/选择器用它**；
+     * 统计、导出、记录归属仍用全量 [tasks]，否则归档后历史会凭空变少。
+     */
+    val activeTasks: StateFlow<List<FocusTask>> = repo.tasks
+        .map { list -> list.filterNot { it.archived } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val records: StateFlow<List<FocusRecord>> =
         repo.records.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val settings: StateFlow<AppSettings> =
@@ -175,6 +186,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     @Volatile
     private var lastTickRealtime = 0L
 
+    /**
+     * 当前运行段的墙钟锚点（= 段起点对应的 wall clock）。
+     * 通知里的 Chronometer 基准由它算出来，保证跑动期间**恒定**，
+     * 否则 Snapshot 去重失效、通知会被高频 notify 打到丢更新。见 [buildSnapshot]。
+     */
+    private var chronometerAnchorWall = 0L
+
     private var taskSelectionInitialized = false
 
     /** 用户在首页手动选过时长后，不再被设置里的「默认时长」覆盖 */
@@ -197,6 +215,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { repo.migrateDefaultDurationIfNeeded() }
         // 旧版 JSON 数据（任务/记录/独立大类表）一次性导入 Room，幂等
         viewModelScope.launch { repo.migrateJsonToRoomIfNeeded() }
+        // 「自由专注」落成真任务行（只播种一次，删掉后不再复活）
+        viewModelScope.launch { repo.ensureFreeFocusTask() }
         // 设置里的「默认专注时长」驱动首页倒计时默认值（未手动选过时生效）
         viewModelScope.launch {
             settings.collect { s ->
@@ -232,7 +252,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         viewModelScope.launch {
-            tasks.collect { list ->
+            activeTasks.collect { list ->
                 val state = _timer.value
                 // 首次加载默认选第一个任务并同步待机时长；之后尊重用户的「自由专注」选择
                 if (!taskSelectionInitialized && list.isNotEmpty()) {
@@ -252,7 +272,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         }
                     }
                 }
-                // 选中任务被删除时回退为自由专注（不自动绑其他任务）。
+                // 选中任务被删除/归档时回退为自由专注（不自动绑其他任务）。
                 // list 为空多半是 Room 还没加载完，先不动——否则恢复出来的 taskId 会在首帧被清掉。
                 // 进行中/暂停的计时不能因为任务没了就抹掉进度，只有待机态才把 elapsed 归零。
                 if (list.isNotEmpty() && state.selectedTaskId != null &&
@@ -283,13 +303,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         // 通知按钮命令回传执行
         viewModelScope.launch {
-            FocusTimerBus.commands.collect { command ->
-                when (command) {
-                    FocusTimerBus.Command.PAUSE -> pauseFocus()
-                    FocusTimerBus.Command.RESUME -> resumeFocus()
-                    FocusTimerBus.Command.STOP -> cancelFocus()
-                }
+            FocusTimerBus.command.collect { command ->
+                if (command == null) return@collect
+                handleCommand(command)
+                FocusTimerBus.consume()
+                timerStore.clearPendingCommand()
             }
+        }
+        // 进程被回收期间落盘、没来得及执行的命令：等任务列表就绪后补做，
+        // 否则记录会挂到「自由专注」上（也保证点过停止的那段不会丢）
+        viewModelScope.launch {
+            val pending = timerStore.loadPendingCommand() ?: return@launch
+            if (!timerStore.isPendingFresh()) {
+                timerStore.clearPendingCommand()
+                return@launch
+            }
+            val command = runCatching { FocusTimerBus.Command.valueOf(pending) }.getOrNull()
+            if (command != null) {
+                // 任务名是记录的快照字段，等 Room 首次发射再写，避免存成「自由专注」
+                if (tasks.value.isEmpty()) {
+                    withTimeoutOrNull(2_000) { tasks.first { it.isNotEmpty() } }
+                }
+                handleCommand(command)
+            }
+            FocusTimerBus.consume()
+            timerStore.clearPendingCommand()
         }
         // 上次被划掉/杀进程时仍在计时或暂停：恢复成暂停态，等用户点「继续」（离开期间不计时）。
         // 先把快照推给服务再启动它，否则服务会先读到默认的 inactive 快照并自我停止。
@@ -310,8 +348,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         val millis = if (state.mode == TimerMode.COUNT_UP) state.elapsedMillis else state.remainingMillis
         val totalSeconds = (millis + 999) / 1000
-        val clock = "${(totalSeconds / 60).toString().padStart(2, '0')}:" +
-            (totalSeconds % 60).toString().padStart(2, '0')
+        // 与计时页同一个格式化：暂停时通知里也是 时:分:秒，不会出现两套写法
+        val clock = formatClockHms(totalSeconds)
         val modeLabel = when {
             state.inBreak -> "番茄计时 · 休息中"
             state.mode == TimerMode.COUNT_UP -> "正计时"
@@ -335,12 +373,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         // 系统 Chronometer 基准：正计时 = 起点，倒计时/番茄 = 终点（往后加剩余时长）。
         // 暂停时必须归 0 —— 否则系统会按墙钟继续走，通知里的时间会自己往前跑。
+        //
+        // 🔴 基准必须取「本次运行段的固定锚点」，不能在 buildSnapshot 里现算
+        //    now - elapsed：那个值每 100ms 都不一样，Snapshot 是 data class、
+        //    靠相等性去重，去重一失效就变成每 100ms notify 一次；系统对同一 id 的
+        //    通知更新有限流，丢掉的那次就永远停在旧内容上 —— 用户在记单词、通知栏
+        //    却还显示数学，根子在这里（2026-10-26）。锚点只在开始/继续/换段时重设。
         val running = active && state.phase == TimerPhase.RUNNING
-        val nowWall = System.currentTimeMillis()
+        // 兜底：任何一条进入 RUNNING 的路径漏设锚点时，就地补一次（幂等），
+        // 否则通知里的时间会算成 1970 或巨大值
+        if (running && chronometerAnchorWall == 0L) resetChronometerAnchor(state.elapsedMillis)
         val chronometerBase = when {
             !running -> 0L
-            state.mode == TimerMode.COUNT_UP -> nowWall - state.elapsedMillis
-            else -> nowWall + state.remainingMillis
+            state.mode == TimerMode.COUNT_UP -> chronometerAnchorWall
+            else -> chronometerAnchorWall + state.totalMillis
         }
         return FocusTimerBus.Snapshot(
             active = active,
@@ -376,6 +422,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (_timer.value.mode != TimerMode.COUNT_UP) {
             _timer.update { it.copy(totalMillis = m * 60_000L, elapsedMillis = 0L) }
         }
+        // 沿用上一次：拨完就写回「倒计时默认时长」，冷启动 / 划掉后台 / 换机恢复都拿得到。
+        // 只在本会话里留着不够——上一个会话一记录完，内存里的选择就随进程没了，
+        // 下次打开又回到 45min（用户反馈的就是这个）。
+        viewModelScope.launch { repo.setDefaultDurationMinutes(m) }
     }
 
     /** 当前选中任务；null = 自由专注 */
@@ -388,12 +438,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun selectFreeFocus() {
         if (_timer.value.phase != TimerPhase.IDLE) return
         _timer.update { it.copy(selectedTaskId = null, elapsedMillis = 0L) }
+        pushSnapshot()
     }
 
     fun selectTask(taskId: String) {
         if (_timer.value.phase != TimerPhase.IDLE) return
         if (tasks.value.none { it.id == taskId }) return
         _timer.update { it.copy(selectedTaskId = taskId, elapsedMillis = 0L) }
+        // 待机态服务已停，这次推送是为了让下一次 startForegroundService 拿到新任务名，
+        // 而不是沿用上一条通知里的旧任务
+        pushSnapshot()
     }
 
     /** 切换计时模式（仅待机态可操作） */
@@ -408,6 +462,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 elapsedMillis = 0L,
             )
         }
+        pushSnapshot()
     }
 
     /**
@@ -432,18 +487,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** 番茄计时 · 每几轮进入一次长休息（至少 1 轮） */
     fun pomodoroRoundsPerCycle(): Int = settings.value.pomodoroRoundsBeforeLongBreak.coerceAtLeast(1)
 
-    /** 开始专注：可不选任务（自由专注，归未分类）；时长用首页所选 */
-    fun startFocus() {
+    /**
+     * 开始专注：可不选任务（自由专注，归未分类）；时长用首页所选。
+     *
+     * [taskId] 显式指定本次要绑定的任务。从任务详情页「开始专注」进来时直接传，
+     * 不再依赖 [selectTask] —— 那个入口在计时未结束时会静默 return，
+     * 结果新任务没绑上、通知栏和记录都还挂在旧任务（数学）上（2026-10-26 他报的问题）。
+     */
+    fun startFocus(taskId: String? = _timer.value.selectedTaskId) {
         val state = _timer.value
         val total = idleTotalMillis(state.mode)
         _timer.value = TimerState(
             phase = TimerPhase.RUNNING,
             mode = state.mode,
-            selectedTaskId = currentTask()?.id,
+            selectedTaskId = taskId,
             totalMillis = total,
         )
+        resetChronometerAnchor(0L)
         FocusCompleteNotifier.cancel(getApplication<Application>())
         persistTimer()
+        // 🔴 先推快照再启服务：服务启动时若读到旧快照，会先渲染上一轮的任务名
+        pushSnapshot()
         syncService(true)
         startTicker()
     }
@@ -452,14 +516,39 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (_timer.value.phase == TimerPhase.RUNNING) {
             _timer.update { it.copy(phase = TimerPhase.PAUSED) }
             persistTimer()
+            pushSnapshot()
         }
     }
 
     fun resumeFocus() {
         if (_timer.value.phase == TimerPhase.PAUSED) {
+            val elapsed = _timer.value.elapsedMillis
             _timer.update { it.copy(phase = TimerPhase.RUNNING) }
+            resetChronometerAnchor(elapsed)
             persistTimer()
+            pushSnapshot()
         }
+    }
+
+    /** 重设 Chronometer 锚点：已跑 [elapsed] 时，把段起点换算成墙钟时刻 */
+    private fun resetChronometerAnchor(elapsed: Long) {
+        chronometerAnchorWall = System.currentTimeMillis() - elapsed
+    }
+
+    /** 通知栏命令的唯一落点（VM 内建与落盘补做共用一套语义） */
+    private fun handleCommand(command: FocusTimerBus.Command) {
+        when (command) {
+            FocusTimerBus.Command.PAUSE -> pauseFocus()
+            FocusTimerBus.Command.RESUME -> resumeFocus()
+            // 「停止」= 结束并记录，和计时页的「结束并记录」完全同一条路径。
+            // 🔴 曾经这里接的是 cancelFocus（丢弃数据），40 分钟点一下就没了。
+            FocusTimerBus.Command.STOP -> finishEarly()
+        }
+    }
+
+    /** 把当前状态同步给通知（不依赖 collect 的调度时机） */
+    private fun pushSnapshot() {
+        FocusTimerBus.snapshot.value = buildSnapshot(_timer.value)
     }
 
     /**
@@ -501,7 +590,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             // 不足 1 分钟不入库，但必须给出明确反馈，避免"点了没反应"
             Toast.makeText(
                 getApplication(),
-                "不足 1 分钟，本次未计入记录",
+                "不足 1min，本次未计入记录",
                 Toast.LENGTH_SHORT,
             ).show()
         }
@@ -525,6 +614,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 elapsedMillis = 0L,
             )
         }
+        // 先推「不活跃」快照再停服，避免服务还挂着一条上一轮的通知
+        pushSnapshot()
         syncService(false)
         timerStore.clear()
     }
@@ -600,6 +691,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                 }
                                 // 自动续上下一轮：上一条「专注完成」通知该退场了
                                 FocusCompleteNotifier.cancel(getApplication<Application>())
+                                resetChronometerAnchor(0L)
                                 persistTimer()
                             } else {
                                 resetToIdle()
@@ -642,6 +734,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                                 )
                             }
                             // 段切换必须立即落盘：否则恢复时会按旧段再结算一次，产生重复记录
+                            resetChronometerAnchor(0L)
                             persistTimer()
                         } else {
                             resetToIdle()
@@ -775,6 +868,34 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { repo.addTask(trimmed, 25, dateLabel, colorIndex, iconIndex, parentId) }
     }
 
+    /** 改任务名 / 图标 / 配色（parentId 不变，改归属不在这次范围内） */
+    fun updateTask(task: FocusTask) {
+        if (task.name.isBlank()) return
+        viewModelScope.launch { repo.updateTask(task.copy(name = task.name.trim())) }
+    }
+
+    /** 归档 / 取消归档（大类级联子任务；记录与统计不动） */
+    fun archiveTask(taskId: String, archived: Boolean) {
+        viewModelScope.launch { repo.archiveTask(taskId, archived) }
+    }
+
+    /** 批量归档 / 取消归档（长按多选后底部操作条用） */
+    fun archiveTasks(taskIds: List<String>, archived: Boolean) {
+        if (taskIds.isEmpty()) return
+        viewModelScope.launch { repo.archiveTasks(taskIds, archived) }
+    }
+
+    /** 批量删除（连同记录移入回收站） */
+    fun deleteTasks(taskIds: List<String>) {
+        if (taskIds.isEmpty()) return
+        viewModelScope.launch { repo.deleteTasks(taskIds) }
+    }
+
+    /** 拖动排序：传入同组任务的新顺序（顶层组 或 同一大类下的子任务组） */
+    fun reorderTasks(orderedIds: List<String>) {
+        viewModelScope.launch { repo.reorderTasks(orderedIds) }
+    }
+
     /** 顶层任务（未分类/分类候选） */
     fun topLevelTasks(): List<FocusTask> = tasks.value.filter { it.parentId == null }
 
@@ -830,6 +951,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteRecord(record: FocusRecord) {
         viewModelScope.launch {
             repo.deleteRecord(record)
+            refreshTrashNow()
+        }
+    }
+
+    /**
+     * 批量删除（记录页多选）：逐条走 [deleteRecord] 会触发 N 次回收站整文件读写 + N 次列表抖动，
+     * 所以合成一次 → 一次性撤得回来（撤销条按整批恢复）。
+     */
+    fun deleteRecords(records: List<FocusRecord>) {
+        if (records.isEmpty()) return
+        viewModelScope.launch {
+            repo.deleteRecords(records)
             refreshTrashNow()
         }
     }
@@ -909,8 +1042,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * 改手动补录记录的时长：**结束时刻不变**，开始时刻按新时长回退。
-     * 真实计时的记录直接忽略（[BackfillRules.canEditDuration] 为 false）。
+     * 改记录时长（真实计时 / 手动补录都开放）：**结束时刻不变**，开始时刻按新时长回退。
+     * 返回 null 只有 [BackfillRules.withDuration] 的兜底分支（时长非法）才会走到。
      */
     fun updateRecordDuration(record: FocusRecord, minutes: Int) {
         val updated = BackfillRules.withDuration(record, minutes) ?: return
@@ -1086,7 +1219,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---- 统计 ----
-    data class DayMinutes(val label: String, val minutes: Int, val isToday: Boolean)
+    /** [isWeekStart] 只给连续横滑的趋势条用：周一那根前面留空隙，周界线看得见 */
+    data class DayMinutes(
+        val label: String,
+        val minutes: Int,
+        val isToday: Boolean,
+        val isWeekStart: Boolean = false,
+    )
 
     data class StatsState(
         val totalMinutes: Int = 0,
@@ -1223,7 +1362,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             Instant.ofEpochMilli(millis).atZone(zone).toLocalDate()
         }
 
-        // 范围起点：本周从周一起算（与 buildWeekPages 口径一致），本月从 1 号起算，全部不限
+        // 范围起点：本周从周一起算（与任务详情趋势的起始口径一致），本月从 1 号起算，全部不限
         val rangeStart: LocalDate? = when (range) {
             StatsRange.WEEK -> today.with(DayOfWeek.MONDAY)
             StatsRange.MONTH -> today.withDayOfMonth(1)
@@ -1379,45 +1518,29 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun dayLabel(day: LocalDate): String = "${day.monthValue}/${day.dayOfMonth}"
 
     // ---- 任务维度统计 ----
-    /** 一周分页：index 0 = 本周，越往后越早 */
-    data class WeekPage(
-        val weekStart: LocalDate,
-        val label: String,
-        val days: List<DayMinutes>,
-        val totalMinutes: Int,
-    )
-
-    /** 全部记录按周分页构建器（调用方先过滤记录）；无记录时至少返回本周一页 */
-    fun buildWeekPages(records: List<FocusRecord>): List<WeekPage> {
+    /**
+     * 任务详情的趋势条：每天一根、从「最早一条记录所在周的周一」到今天，**空白天也画**。
+     * 不再按周分页 —— 分页翻篇时本周周一和前周周日总粘在一起，横向长滑才是统计页「全部」那种手感。
+     * 起点对齐到周一是为了让每个周一前面都能留出周界空隙（见 TrendScrollStrip）。
+     */
+    fun buildDayTrend(records: List<FocusRecord>): List<DayMinutes> {
+        if (records.isEmpty()) return emptyList()
         val zone = ZoneId.systemDefault()
         val today = LocalDate.now(zone)
-        val currentWeekStart = today.with(DayOfWeek.MONDAY)
         val byDay = records
             .groupBy { Instant.ofEpochMilli(it.endEpochMillis).atZone(zone).toLocalDate() }
             .mapValues { entry -> entry.value.sumOf { it.minutes } }
-        val earliestWeekStart = (byDay.keys.minOrNull() ?: today).with(DayOfWeek.MONDAY)
-        val weekLabels = listOf("一", "二", "三", "四", "五", "六", "日")
-        val pages = mutableListOf<WeekPage>()
-        var cursor = currentWeekStart
-        while (!cursor.isBefore(earliestWeekStart)) {
-            val weekEnd = cursor.plusDays(6)
-            val days = (0..6).map { offset ->
-                val day = cursor.plusDays(offset.toLong())
-                DayMinutes(
-                    label = weekLabels[offset],
-                    minutes = byDay[day] ?: 0,
-                    isToday = day == today,
-                )
-            }
-            val label = if (cursor == currentWeekStart) {
-                "本周"
-            } else {
-                "%02d.%02d-%02d.%02d".format(cursor.monthValue, cursor.dayOfMonth, weekEnd.monthValue, weekEnd.dayOfMonth)
-            }
-            pages.add(WeekPage(cursor, label, days, days.sumOf { it.minutes }))
-            cursor = cursor.minusWeeks(1)
+        val start = byDay.keys.min().with(DayOfWeek.MONDAY)
+        val span = ChronoUnit.DAYS.between(start, today).toInt() + 1
+        return (0 until span).map { offset ->
+            val day = start.plusDays(offset.toLong())
+            DayMinutes(
+                label = dayLabel(day),
+                minutes = byDay[day] ?: 0,
+                isToday = day == today,
+                isWeekStart = day.dayOfWeek == DayOfWeek.MONDAY,
+            )
         }
-        return pages
     }
 
     /** 任务聚合项（范围统计用），按时长降序 */

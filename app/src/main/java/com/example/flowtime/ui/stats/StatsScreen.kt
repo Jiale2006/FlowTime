@@ -3,8 +3,13 @@ package com.example.flowtime.ui.stats
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
@@ -16,11 +21,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -61,6 +69,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.flowtime.data.FocusRecord
@@ -76,7 +85,7 @@ import com.example.flowtime.ui.components.DonutSlice
 import com.example.flowtime.ui.components.HourBarsChart
 import com.example.flowtime.ui.components.MonthHeatmapPager
 import com.example.flowtime.ui.components.ProCard
-import com.example.flowtime.ui.components.formatMinutesHm
+import com.example.flowtime.ui.components.formatMinutesCompact
 import com.example.flowtime.ui.components.OvershootEasing
 import com.example.flowtime.ui.components.rememberCountUp
 import com.example.flowtime.ui.components.rememberCountUpFloat
@@ -106,7 +115,7 @@ import kotlin.math.abs
 /**
  * 统计页（单页向下滚动）：
  * 范围切换（本周/本月/全部）+ 三卡总览 + 范围概览 + 专注趋势 + 时段分布
- * + 任务分布（卡片自带 今天/本周/本月 chip，今天档可右滑看前一天）
+ * + 任务分布（卡片自带 今天/本周/本月 chip，今天档可右滑看前一天；页面选「全部」时只剩「全部」）
  * + 单次时长 + 最强一天 + 月份热力图 + CSV 导出。
  * 「分类分布」已整块删除（2026-10-23：他的任务是"顶层任务"结构，该维度只会显示「未分类」）。
  */
@@ -137,9 +146,28 @@ fun StatsScreen(viewModel: AppViewModel) {
      *    再切「本周」就会跟到 8 月 1 日那周 —— 像是被拖走了。独立之后，切档各自
      *    回到自己上次看的位置（没翻过就是今天所在的日/周/月）。
      */
-    var distRange by remember { mutableStateOf(TaskDistRange.TODAY) }
+    // 初始值就跟页面范围对齐：范围跨启动记在 settings 里，直接选「全部」时
+    // 不要先渲染一帧「今天」+三个 chip 再收成「全部」
+    var distRange by remember {
+        mutableStateOf(
+            if (range == StatsRange.ALL) TaskDistRange.ALL else TaskDistRange.TODAY,
+        )
+    }
     val distAnchors = remember { mutableStateMapOf<TaskDistRange, LocalDate>() }
     val distAnchor = distAnchors[distRange] ?: LocalDate.now()
+    // 页面选「全部」时，任务分布也只给「全部」（没有上一个区间可翻）；回到本周/本月时回到今天档
+    LaunchedEffect(range) {
+        if (range == StatsRange.ALL) {
+            distRange = TaskDistRange.ALL
+        } else if (distRange == TaskDistRange.ALL) {
+            distRange = TaskDistRange.TODAY
+        }
+    }
+    val distOptions = if (range == StatsRange.ALL) {
+        listOf(TaskDistRange.ALL)
+    } else {
+        listOf(TaskDistRange.TODAY, TaskDistRange.WEEK, TaskDistRange.MONTH)
+    }
     val distTotals = remember(records, tasks, distRange, distAnchor) {
         taskTotalsFor(records, tasks, distRange, distAnchor)
     }
@@ -193,25 +221,48 @@ fun StatsScreen(viewModel: AppViewModel) {
             }
             Spacer(Modifier.height(20.dp))
 
-            // 1. 三卡总览 + 今日目标进度
+            // 1. 总览 + 今日目标进度
             // 第一张卡**跟范围**：原来它固定全量，于是切到"本周"时同屏出现
             // 「总专注 120h」和「累计专注 3h」——两个都叫专注总量，差 40 倍。
             // 「今日」「连续天数」不范围化：它们是天然的跨范围概念（口径原则里的成就/里程碑类）。
+            //
+            // 🔴 2026-10-25 去重 + 拉主次：原来三张等权（今日 / 本周 / 连续天数），
+            //    而「今日」又和目标卡右上角的 "30 分钟 / 2 小时" 说的是同一件事 ——
+            //    一个数字在一屏出现两次，三张卡还一样大，等于没有主次。
+            //    现在：今日做**主指标**（更宽、字更大），本周与连续天数做次级；
+            //    目标卡只留目标值和进度条，不再重复今日读数。
             Entrance(played = entrancePlayed, delayMillis = DelayTop) {
                 Column {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // 高度对齐：Row 拿最高的那张（今日 26sp）当基准，其余撑到同高，
+                    // 否则三张卡各按自己内容撑高，右侧「本月」会比「今日专注」矮一截
+                    Row(
+                        modifier = Modifier.height(IntrinsicSize.Max),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        StatCard(
+                            label = "今日专注",
+                            value = stats.todayMinutes,
+                            kind = StatValueKind.MINUTES,
+                            modifier = Modifier.weight(1.4f).fillMaxHeight(),
+                            valueSize = 26.sp,
+                        )
                         StatCard(
                             label = when (range) {
-                                StatsRange.WEEK -> "本周专注"
-                                StatsRange.MONTH -> "本月专注"
-                                StatsRange.ALL -> "历史专注"
+                                StatsRange.WEEK -> "本周"
+                                StatsRange.MONTH -> "本月"
+                                StatsRange.ALL -> "历史"
                             },
                             value = rangeStats.totalMinutes,
                             kind = StatValueKind.DURATION,
-                            modifier = Modifier.weight(1f),
+                            // 历史值可能是 "1234h 30min"（102.5dp）：原来 1f 只给 104.8dp，贴边到只剩 2dp
+                            modifier = Modifier.weight(1.3f).fillMaxHeight(),
                         )
-                        StatCard("今日", stats.todayMinutes, StatValueKind.MINUTES, Modifier.weight(1f))
-                        StatCard("连续天数", stats.streakDays, StatValueKind.DAYS, Modifier.weight(1f))
+                        StatCard(
+                            label = "连续天数",
+                            value = stats.streakDays,
+                            kind = StatValueKind.DAYS,
+                            modifier = Modifier.weight(0.9f).fillMaxHeight(),
+                        )
                     }
                     Spacer(Modifier.height(16.dp))
                     GoalCard(
@@ -269,16 +320,26 @@ fun StatsScreen(viewModel: AppViewModel) {
             // 2.5 与上一区间对比（本周 vs 上周 / 本月 vs 上月）。
             // 「全部」档没有可比的上一区间，所以不显示——而不是显示一个假的 0。
             val previousMinutes = rangeStats.previousMinutes
-            if (range != StatsRange.ALL && previousMinutes != null) {
-                Entrance(played = entrancePlayed, delayMillis = DelayCompare) {
-                    CompareCard(
-                        currentMinutes = rangeStats.totalMinutes,
-                        previousMinutes = previousMinutes,
-                        previousLabel = rangeStats.previousLabel.orEmpty(),
-                        changePercent = rangeStats.changePercent,
-                    )
+            // 「全部」档没有上一区间：用 AnimatedVisibility 让它带着高度平滑地收上去，
+            // 而不是整张卡凭空消失、下面所有内容瞬间上移一张卡。
+            AnimatedVisibility(
+                visible = range != StatsRange.ALL && previousMinutes != null,
+                enter = fadeIn(tween(Motion.DurationPress)) +
+                    expandVertically(tween(Motion.DurationPress)),
+                exit = fadeOut(tween(Motion.DurationPress)) +
+                    shrinkVertically(tween(Motion.DurationPress)),
+            ) {
+                Column {
+                    Entrance(played = entrancePlayed, delayMillis = DelayCompare) {
+                        CompareCard(
+                            currentMinutes = rangeStats.totalMinutes,
+                            previousMinutes = previousMinutes ?: 0,
+                            previousLabel = rangeStats.previousLabel.orEmpty(),
+                            changePercent = rangeStats.changePercent,
+                        )
+                    }
+                    Spacer(Modifier.height(16.dp))
                 }
-                Spacer(Modifier.height(16.dp))
             }
 
             // 3. 专注趋势：全部范围按周分页（左右滑看更早），本周/本月按天
@@ -319,8 +380,8 @@ fun StatsScreen(viewModel: AppViewModel) {
                             DailyBarsStrip(
                                 days = rangeStats.dailyDays,
                                 countDelayMillis = DelayTrend + CountLag,
-                                // 全部档只画有记录的日子，日期必须每根都标，否则一眼看不出是哪天
-                                labelEveryBar = range == StatsRange.ALL,
+                                // 本月/全部都每天标日期（本月只有 31 根，跳着标就看不出是哪天）
+                                labelEveryBar = range != StatsRange.WEEK,
                             )
                         }
                     }
@@ -342,7 +403,7 @@ fun StatsScreen(viewModel: AppViewModel) {
                             peakHourRange(rangeStats.hourMinutes)?.let { peakRange ->
                                 Text(
                                     "最专注 $peakRange · ${
-                                        formatMinutesHm(rangeStats.hourMinutes.maxOrNull() ?: 0)
+                                        formatMinutesCompact(rangeStats.hourMinutes.maxOrNull() ?: 0)
                                     }",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium,
@@ -368,14 +429,19 @@ fun StatsScreen(viewModel: AppViewModel) {
                     hint = taskDistHint(distRange, distAnchor),
                     totals = distTotals,
                     centerSubtext = when (distRange) {
+                        TaskDistRange.ALL -> "全部专注"
                         TaskDistRange.TODAY -> "当日专注"
                         TaskDistRange.WEEK -> "本周专注"
                         TaskDistRange.MONTH -> "本月专注"
                     },
-                    emptyText = "${taskDistPeriodLabel(distRange, distAnchor)}没有专注记录 · 继续左右滑看看",
+                    emptyText = if (distRange == TaskDistRange.ALL) {
+                        "还没有专注记录"
+                    } else {
+                        "${taskDistPeriodLabel(distRange, distAnchor)}没有专注记录 · 继续左右滑看看"
+                    },
                     headerExtra = {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            TaskDistRange.entries.forEach { item ->
+                            distOptions.forEach { item ->
                                 RangeChip(
                                     label = item.label,
                                     selected = distRange == item,
@@ -384,8 +450,13 @@ fun StatsScreen(viewModel: AppViewModel) {
                             }
                         }
                     },
-                    onSwipeBack = { distAnchors[distRange] = shiftAnchor(distAnchor, distRange, -1) },
-                    onSwipeForward = { distAnchors[distRange] = shiftAnchor(distAnchor, distRange, +1) },
+                    // 全部档没有可翻的上一段：不给于势，免得“滑一下什么都没发生”
+                    onSwipeBack = if (distRange == TaskDistRange.ALL) null else {
+                        { distAnchors[distRange] = shiftAnchor(distAnchor, distRange, -1) }
+                    },
+                    onSwipeForward = if (distRange == TaskDistRange.ALL) null else {
+                        { distAnchors[distRange] = shiftAnchor(distAnchor, distRange, +1) }
+                    },
                 )
             }
             Spacer(Modifier.height(16.dp))
@@ -593,7 +664,9 @@ private fun GoalCard(
                     modifier = Modifier.weight(1f),
                 )
                 Text(
-                    "${formatMinutesHm(todayMinutes)} / ${formatMinutesHm(goalMinutes)}",
+                    // 🔴 只写目标值：今日读数已经在上方的主卡里，
+                    //    原来这里也写 "30 分钟 / 2 小时"，同一屏说了两遍。
+                    "目标 ${formatMinutesCompact(goalMinutes)}",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                     color = if (done) AccentGreen else Primary,
@@ -636,7 +709,7 @@ private fun GoalCard(
                     if (isDone) {
                         "今天的目标已完成"
                     } else {
-                        "还差 ${formatMinutesHm((goalMinutes - todayMinutes).coerceAtLeast(0))}"
+                        "还差 ${formatMinutesCompact((goalMinutes - todayMinutes).coerceAtLeast(0))}"
                     },
                     fontSize = 12.sp,
                     color = noteColor,
@@ -813,7 +886,7 @@ private fun DistributionCard(
                                 )
                             }
                         },
-                        centerText = if (totals.isEmpty()) "0" else formatMinutesHm(totalMinutes),
+                        centerText = if (totals.isEmpty()) "0" else formatMinutesCompact(totalMinutes),
                         centerSubtext = centerSubtext,
                         modifier = Modifier.weight(0.44f),
                     )
@@ -840,7 +913,7 @@ private fun DistributionCard(
                                         modifier = Modifier.weight(1f),
                                     )
                                     Text(
-                                        formatMinutesHm(item.minutes),
+                                        formatMinutesCompact(item.minutes),
                                         fontSize = 12.sp,
                                         color = TextSecondary,
                                     )
@@ -878,6 +951,30 @@ private fun CompareCard(
     changePercent: Int?,
 ) {
     val accent = if (currentMinutes >= previousMinutes) AccentGreen else WarningAmber
+    // 🔴 上一区间没记录时**不摆两张 0**（2026-10-25）：原来这种情况仍然占一整张卡、
+    //    里面两个大数字一个 30 分钟一个 0 分钟，信息量只有一句话。空态就该是一行。
+    //    「本期」也不必在这重复 —— 它就在上方的范围主卡里。
+    if (changePercent == null) {
+        ProCard(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                Modifier.padding(horizontal = Dimens.CardPadding, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "与$previousLabel 对比",
+                    fontSize = 14.sp,
+                    color = TextSecondary,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "上一区间无记录，没法比",
+                    fontSize = 12.sp,
+                    color = TextPlaceholder,
+                )
+            }
+        }
+        return
+    }
     ProCard(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(Dimens.CardPadding)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -889,14 +986,13 @@ private fun CompareCard(
                 )
                 Text(
                     text = when {
-                        changePercent == null -> "上一区间无记录"
                         changePercent > 0 -> "↑ $changePercent%"
                         changePercent < 0 -> "↓ ${-changePercent}%"
                         else -> "持平"
                     },
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
-                    color = if (changePercent == null) TextPlaceholder else accent,
+                    color = accent,
                 )
             }
             Spacer(Modifier.height(12.dp))
@@ -944,7 +1040,8 @@ private fun DurationBucketsCard(buckets: List<StatsRules.DurationBucket>, hint: 
                             bucket.label,
                             fontSize = 12.sp,
                             color = TextSecondary,
-                            modifier = Modifier.width(56.dp),
+                            // 62dp：装得下 "15-30min" 这种 8 字符的档位标签
+                            modifier = Modifier.width(62.dp),
                         )
                         Box(
                             modifier = Modifier
@@ -994,7 +1091,7 @@ private fun TopDaysCard(days: List<StatsRules.TopDay>) {
             }
             Spacer(Modifier.height(12.dp))
             days.forEachIndexed { index, day ->
-                // 整行走基线对齐：中文日期与 `1 h 30 min` 的字体 ascent 不同，
+                // 整行走基线对齐：中文日期与 `1h 30min` 的字体 ascent 不同，
                 // 按中心对齐时数字会整体往下坠（他报的"最强的一天偏下"）
                 Row(modifier = Modifier.fillMaxWidth()) {
                     Box(
@@ -1023,7 +1120,7 @@ private fun TopDaysCard(days: List<StatsRules.TopDay>) {
                         modifier = Modifier.weight(1f).alignByBaseline(),
                     )
                     Text(
-                        formatMinutesHm(day.minutes),
+                        formatMinutesCompact(day.minutes),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
                         color = Primary,
@@ -1070,9 +1167,15 @@ private fun Entrance(
 
 private enum class StatValueKind { DURATION, MINUTES, DAYS, COUNT }
 
-/** 数值 → 文案。滚动过程中也走它，保证中间帧的格式和终值一致（不然会看到 "1440min" 突然变 "24h"） */
+/**
+ * 数值 → 文案。滚动过程中也走它，保证中间帧的格式和终值一致
+ * （不然会看到 "1440min" 突然变 "24h"）。
+ *
+ * 时长类**全站统一走紧凑写法**（[formatMinutesCompact]）：三张卡并排 + 圆环中心 + 最强一天
+ * 的右列都吃宽度，`1h 45min` 不会被挤到换行。
+ */
 private fun formatStatValue(kind: StatValueKind, value: Int): String = when (kind) {
-    StatValueKind.DURATION, StatValueKind.MINUTES -> formatMinutesHm(value)
+    StatValueKind.DURATION, StatValueKind.MINUTES -> formatMinutesCompact(value)
     StatValueKind.DAYS -> "$value 天"
     StatValueKind.COUNT -> "$value 次"
 }
@@ -1085,6 +1188,8 @@ private fun StatCard(
     kind: StatValueKind,
     modifier: Modifier = Modifier,
     countDelayMillis: Int = DelayTop + CountLag,
+    /** 主指标可以放大一档（三张等权大数字是模板味最重的地方，见调用处） */
+    valueSize: TextUnit = 20.sp,
 ) {
     val animated = rememberCountUp(value, delayMillis = countDelayMillis)
     val text = formatStatValue(kind, animated)
@@ -1097,7 +1202,21 @@ private fun StatCard(
                 .padding(vertical = 16.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(text, fontSize = 20.sp, fontWeight = FontWeight.Medium, color = Primary)
+            // 值可能是 "1000h 30min"（10 字以上）或用户把系统字体调大：卡片只有 82dp 宽，
+            // 不缩字号就会换行把卡片撑成两行、和旁边两张不齐（2026-10-26 实测 "30h 4min" 已占满 193/246px）。
+            // autoSize 只在放不下时缩字，放得下时完全没变化。
+            Text(
+                text = text,
+                fontSize = valueSize,
+                fontWeight = FontWeight.Medium,
+                color = Primary,
+                maxLines = 1,
+                autoSize = TextAutoSize.StepBased(
+                    minFontSize = 11.sp,
+                    maxFontSize = valueSize,
+                    stepSize = 1.sp,
+                ),
+            )
             Spacer(Modifier.height(4.dp))
             Text(label, fontSize = 12.sp, color = TextSecondary)
         }
@@ -1108,11 +1227,12 @@ private fun StatCard(
 private val DonutColors: List<Color>
     get() = listOf(Primary, AccentGreen, WarningAmber, Gold, PrimaryLight, SuccessGreen)
 
-/** 任务分布卡片自己的时间档（与页面顶部的范围 chip 相互独立） */
+/** 任务分布卡片自己的时间档（与页面顶部的范围 chip 相互独立）；[ALL] 只在页面选「全部」时出现 */
 private enum class TaskDistRange(val label: String) {
     TODAY("今天"),
     WEEK("本周"),
     MONTH("本月"),
+    ALL("全部"),
 }
 
 /**
@@ -1130,9 +1250,14 @@ private fun taskTotalsFor(
     zone: ZoneId = ZoneId.systemDefault(),
 ): List<AppViewModel.TaskTotal> {
     val index = RecordLink.TaskIndex.of(tasks)
-    val from: LocalDate
-    val to: LocalDate
+    // 全部档不分时间段，整段记录全算
+    val from: LocalDate?
+    val to: LocalDate?
     when (range) {
+        TaskDistRange.ALL -> {
+            from = null
+            to = null
+        }
         TaskDistRange.TODAY -> {
             from = anchor
             to = anchor
@@ -1148,6 +1273,7 @@ private fun taskTotalsFor(
     }
     return records
         .filter { record ->
+            if (from == null || to == null) return@filter true
             // 按结束时刻归日（全项目统一口径）
             val d = Instant.ofEpochMilli(record.endEpochMillis).atZone(zone).toLocalDate()
             !d.isBefore(from) && !d.isAfter(to)
@@ -1175,16 +1301,19 @@ private fun shiftAnchor(
     today: LocalDate = LocalDate.now(),
 ): LocalDate {
     val moved = when (range) {
+        TaskDistRange.ALL -> anchor
         TaskDistRange.TODAY -> anchor.plusDays(direction.toLong())
         TaskDistRange.WEEK -> anchor.plusWeeks(direction.toLong())
         TaskDistRange.MONTH -> anchor.plusMonths(direction.toLong())
     }
     val limit = when (range) {
+        TaskDistRange.ALL -> today
         TaskDistRange.TODAY -> today
         TaskDistRange.WEEK -> today.with(DayOfWeek.MONDAY)
         TaskDistRange.MONTH -> today.withDayOfMonth(1)
     }
     val target = when (range) {
+        TaskDistRange.ALL -> anchor
         TaskDistRange.TODAY -> moved
         TaskDistRange.WEEK -> moved.with(DayOfWeek.MONDAY)
         TaskDistRange.MONTH -> moved.withDayOfMonth(1)
@@ -1200,6 +1329,7 @@ private fun taskDistHint(
 ): String {
     val base = taskDistPeriodLabel(range, anchor, today)
     return when (range) {
+        TaskDistRange.ALL -> base
         TaskDistRange.TODAY -> "$base · 左右滑切换日期"
         TaskDistRange.WEEK -> "$base · 左右滑切换周"
         TaskDistRange.MONTH -> "$base · 左右滑切换月"
@@ -1212,6 +1342,8 @@ private fun taskDistPeriodLabel(
     anchor: LocalDate,
     today: LocalDate = LocalDate.now(),
 ): String = when (range) {
+    TaskDistRange.ALL -> "全部记录"
+
     TaskDistRange.TODAY -> when {
         anchor == today -> "今天 · ${anchor.monthValue}月${anchor.dayOfMonth}日"
         anchor == today.minusDays(1) -> "昨天 · ${anchor.monthValue}月${anchor.dayOfMonth}日"

@@ -13,12 +13,12 @@ import androidx.compose.ui.unit.dp
 // ── 多主题体系 ─────────────────────────────────────────────────
 // 全站界面只引用本文件的 token（BgPrimary、Primary……），token 是
 // 「当前调色板 ActivePalette」的读取器；设置页切换主题时整体换装。
-// 现有五套主题：水彩画风 / 玻璃拟态 / 手绘涂鸦 / 单色极简 / 粒子系统。
+// 现有六套主题：水彩画风 / 玻璃拟态 / 手绘涂鸦 / 单色极简 / 粒子系统 / 宫廷御制。
 // 形状与装饰也属于主题语言（卡片圆角、胶囊 chip、虚线边框、横幅笔刷），
 // 一并放进 AppPalette，组件里不允许再写死 RoundedCornerShape。
 
 /** 可切换的主题模式 */
-enum class ThemeMode { WATERCOLOR, NOCTURNE, DOODLE, MONO, PARTICLES }
+enum class ThemeMode { WATERCOLOR, NOCTURNE, DOODLE, MONO, PARTICLES, IMPERIAL }
 
 /** 一套主题的全部 token：颜色 + 形状 + 装饰 */
 interface AppPalette {
@@ -578,11 +578,116 @@ object ParticlePalette : AppPalette {
 }
 
 
+// ── 宫廷御制 / Imperial Court（第六版）────────────────────────────
+// 提示词：风格提示词/宫廷风.md（style_slug: imperial-court）。规则：玄青底
+// （#0B1214）+ 孔雀青/金雾两枚柔光斑；面板是深漆实体（禁 backdrop-blur）；
+// 鎏金 #C9A227 是唯一正色，只做章（主操作/关键数字/选中态/描金细线），禁铺底；
+// 装饰只允许金线、回纹式直角描线、印章徽标；圆角统一 16dp / 24dp；
+// 过渡走 spring easing（禁 100/150ms 快过渡）。
+
+/** 玄青场景色（背景拥有全部颜色；仅宫廷场景层直接使用） */
+val ImperialInk = Color(0xFF060B0D)        // 玄墨：页面边缘 / 渐变终点
+val ImperialNight = Color(0xFF0B1214)      // 玄青：主背景
+val ImperialLacquer = Color(0xFF14211F)    // 漆面抬升：卡片
+val ImperialLacquerHigh = Color(0xFF1A2926) // 弹窗漆面
+val ImperialNavBar = Color(0xFF0F1917)     // 导航条沉底
+val ImperialPeacock = Color(0xFF407C86)    // 孔雀青（光斑）
+val ImperialGoldMist = Color(0xFFC98F4E)   // 金雾（光斑）
+
+/** 唯一正色：鎏金（金不满章） */
+val ImperialGold = Color(0xFFC9A227)
+val ImperialGoldBright = Color(0xFFEBD68F) // 亮金：高亮文字、描线
+val ImperialGoldDeep = Color(0xFF8F7318)   // 深金：次级按压 / 暗态
+val ImperialOnGold = Color(0xFF1A1508)     // 金底上的深字
+val ImperialGoldTint = Color(0x24C9A227)   // 金 tint 14%：选中态 / 进度轨道
+
+object ImperialCourtPalette : AppPalette {
+    override val mode = ThemeMode.IMPERIAL
+    override val label = "宫廷御制"
+    override val tagline = "玄青 · 金瓦"
+    override val previewDots = listOf(ImperialNight, ImperialGold, ImperialPeacock)
+
+    override val bgPrimary = ImperialNight
+    override val primary = ImperialGold
+    override val primaryDark = ImperialGoldDeep
+    override val primaryLight = ImperialGoldBright
+    override val accentGreen = Color(0xFF6FB3A6)          // 铜绿（孔雀青侧）
+    override val cardGreenLight = ImperialGoldTint        // 选中态 = 金 tint
+    override val cardOrange = ImperialGoldMist
+    override val cardCream = ImperialLacquer
+    override val mutedSurface = ImperialNavBar
+    override val gold = ImperialGold
+    override val textPrimary = Color(0xFFEDE6D4)
+    override val textSecondary = Color(0xFFC4BBA4)
+    override val textPlaceholder = Color(0xFF8F8871)
+    override val dividerColor = Color(0x1AC9A227)         // 发丝线：描金 10%
+    override val borderColor = Color(0x33C9A227)          // 描金细线 20%
+    // 深漆实体卡：90% 不透明（提示词下限 80%），禁 backdrop-blur
+    override val surfaceCard = Color(0xE614211F)
+    override val dialogContainer = ImperialLacquerHigh
+    override val errorRed = Color(0xFFD98E96)
+    override val warningAmber = Color(0xFFD9B45B)
+    override val successGreen = Color(0xFF7FB69E)
+    override val disabledGray = Color(0xFF55616E)
+    // 16 组深漆压色：白字对比度均 ≥4.5:1；按「青 → 青 → 褐 → 紫 → 底 → 金」韵律加深拉灰
+    override val taskCardPalette = listOf(
+        Color(0xFF2E4A4E) to Color.White,     // 黛青
+        Color(0xFF35605A) to Color.White,     // 苍青
+        Color(0xFF6E5A2E) to Color.White,     // 金褐
+        Color(0xFF4E3A50) to Color.White,     // 紫檀
+        ImperialLacquer to Color.White,       // 玄青
+        ImperialGold to ImperialOnGold,       // 鎏金（金底深字）
+        Color(0xFF22464A) to Color.White,     // 黛青深
+        Color(0xFF3E6A62) to Color.White,     // 苍青浅
+        Color(0xFF5B4A26) to Color.White,     // 金褐深
+        Color(0xFF3E2E40) to Color.White,     // 紫檀深
+        ImperialLacquerHigh to Color.White,   // 弹窗漆面
+        ImperialGoldBright to ImperialOnGold, // 亮金（金底深字）
+        Color(0xFF35404A) to Color.White,     // 铁青（拉灰）
+        Color(0xFF4A6B5C) to Color.White,     // 苔青
+        Color(0xFF6B5240) to Color.White,     // 褐灰
+        Color(0xFF514052) to Color.White,     // 藕紫
+    )
+    override val navContainer = ImperialNavBar
+    override val navItemUnselected = Color(0xFF8F8871)
+    // 深底上默认 primaryDark（深金）压在金 tint 胶囊上会糊；选中内容用亮金（提示词选中态）
+    override val navIndicatorContent = ImperialGoldBright
+    override val shadowInk = ImperialInk
+    override val shadowAmbientAlpha = 0.35f
+    override val shadowSpotAlpha = 0.32f
+    override val ink = ImperialPeacock
+    override val peach = ImperialGoldMist
+    override val teal = Color(0xFF6FB3A6)
+    override val rose = Color(0xFFC4848F)
+    override val sand = ImperialGoldBright
+
+    // 热力图五档：深→亮单调递增（提示词给定色阶，青到亮绿），深底必须不透明
+    override val heatRamp = listOf(
+        Color(0xFF233A38),
+        Color(0xFF35605A),
+        Color(0xFF4E8A72),
+        Color(0xFF86B896),
+        Color(0xFFC9E8C0),
+    )
+
+    // 圆角统一 16dp / 24dp 一档；胶囊压回 16dp（禁 rounded-full 与直角混用）
+    override val cardShape = RoundedCornerShape(24.dp)
+    override val tileShape = RoundedCornerShape(16.dp)
+    override val badgeShape = RoundedCornerShape(12.dp)
+    override val buttonShape = RoundedCornerShape(16.dp)
+    override val pillShape = RoundedCornerShape(16.dp)
+    override val dashedBorders = false
+    // 横幅：深漆 → 苍青（横幅文字是白色，禁金色铺底）
+    override val bannerBrush = Brush.horizontalGradient(
+        listOf(Color(0xFF35605A), ImperialLacquer),
+    )
+}
+
 /** 全部主题（选择界面按此顺序展示） */
 val AllPalettes: List<AppPalette> =
     listOf(
         WatercolorPalette, NocturnePalette, DoodlePalette,
-        MonoPalette, ParticlePalette,
+        MonoPalette, ParticlePalette, ImperialCourtPalette,
     )
 
 /** 当前生效的调色板（快照状态：切换后所有读取它的组合范围自动重组） */
@@ -595,6 +700,7 @@ fun paletteFor(mode: ThemeMode): AppPalette =
         ThemeMode.DOODLE -> DoodlePalette
         ThemeMode.MONO -> MonoPalette
         ThemeMode.PARTICLES -> ParticlePalette
+        ThemeMode.IMPERIAL -> ImperialCourtPalette
     }
 
 // ── 全站 token（读取 ActivePalette，调用点无需感知主题切换）──────

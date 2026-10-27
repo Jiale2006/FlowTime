@@ -170,7 +170,7 @@ fun MonthHeatmapPager(
                 modifier = Modifier.weight(1f),
             )
             Text(
-                "${current.activeDays} 天有记录 · 共 ${formatMinutesHm(current.totalMinutes)}",
+                "${current.activeDays} 天有记录 · 共 ${formatMinutesCompact(current.totalMinutes)}",
                 fontSize = 11.sp,
                 color = TextPlaceholder,
             )

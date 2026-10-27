@@ -10,7 +10,8 @@ import com.example.flowtime.ui.theme.ThemeMode
  * 玻璃拟态用夜航光斑场景（玻璃才有东西可借光），
  * 水彩画风用水彩晕染底，
  * 手绘涂鸦用笔记本纸页（横线 + 红边线 + 涂鸦），
- * 粒子系统用深蓝黑底 + 漂浮粒子网（粒子 + 邻近连线）。
+ * 粒子系统用深蓝黑底 + 漂浮粒子网（粒子 + 邻近连线），
+ * 宫廷御制用玄青底 + 孔雀青/金雾两枚柔光斑。
  * 单色极简走 else：纸底就够，不加场景层。
  *
  * 本层由 `MainActivity` 在 **NavHost 外全局挂一次**（2026-10-16 起）：所有页面共用同一张
@@ -30,6 +31,7 @@ fun ThemeBackdrop(
         ThemeMode.DOODLE -> DoodleBackdrop(modifier)
         ThemeMode.WATERCOLOR -> WatercolorBloom(modifier)
         ThemeMode.PARTICLES -> ParticleNetBackdrop(modifier, keepOutCenterYFraction)
+        ThemeMode.IMPERIAL -> ImperialCourtScene(modifier)
         else -> {}
     }
 }

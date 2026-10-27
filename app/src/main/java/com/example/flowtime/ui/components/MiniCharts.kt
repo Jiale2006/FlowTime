@@ -59,7 +59,7 @@ fun DonutChart(
             }
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            // 时长文案偏长（如「14 h 54 min」）时缩小字号，避免压到圆环上
+            // 时长文案偏长（如「1h 45min」）时缩小字号，避免压到圆环上
             Text(
                 text = centerText,
                 fontSize = if (centerText.length > 8) 16.sp else 22.sp,

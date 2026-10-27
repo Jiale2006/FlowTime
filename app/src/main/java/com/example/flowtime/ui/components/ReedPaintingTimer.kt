@@ -15,6 +15,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
@@ -42,8 +43,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.flowtime.ui.theme.TextPrimary
 import com.example.flowtime.ui.theme.TextSecondary
-import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.cos
 import kotlin.math.sin
 
 // ── 纸底与钤印色 ─────────────────────────────────────────────
@@ -57,12 +58,12 @@ private fun clamp01f(x: Float) = x.coerceIn(0f, 1f)
 private fun easeIO(t: Float) = if (t < 0.5f) 2f * t * t else 1f - Math.pow(-2.0 * t + 2.0, 2.0).toFloat() / 2f
 
 /**
- * 水彩主题计时器：「芦苇河」原作随专注慢慢显影，过半后芦苇逐支随风摆动。
+ * 水彩主题计时器：「芦苇河」原作**全程完整显示**，过半后芦苇逐支随风摆动。
  *
- * - progress ∈ [0,1]：显影进度。**三种计时模式同一条曲线**（四次方根，前紧后松）：
- *   开场就显影 31%、半程 ≈84%，见 TimerScreen 的 `paintingP`；
- *   曾经倒计时/番茄用的是 ×2 曲线，遮罩会明显盖很久，与正计时观感不一致（2026-10-24 统一）；
- * - 风场（windActive 由 TimerScreen 决定，当前显影过半后启动）：
+ * 🔴 2026-10-25 他要求"那层遮挡物不要设置透明度了" —— 原来画作会按进度被一层白雾
+ *    （显影遮罩，DstIn 软边光斑）盖住：倒计时/番茄前半程整幅画都在"洗"，只有专注过半
+ *    才接近全显。现在遮罩整段删除，画作从第一秒起就是完整的；随时间变化的只剩风与钤印。
+ * - 风场（windActive 由 TimerScreen 决定，真实进度过半后启动）：
  *   底画（reed_base.png，芦苇区已补底）保持静止，
  *   每支芦苇（reed_s0..7.png，用户标注切割出的穗+茎+叶）绕**自己的根部**微旋转，
  *   摆相按行波从左向右扫过（根部钉死、穗尖划弧），远景支减半——动的全是原画真笔触；
@@ -71,6 +72,7 @@ private fun easeIO(t: Float) = if (t < 0.5f) 2f * t * t else 1f - Math.pow(-2.0 
  */
 @Composable
 fun ReedPaintingTimer(
+    /** 显影进度 0..1：0 = 整幅画被湿气完全挡住，1 = 全部显完 */
     progress: Float,
     timeText: String,
     modeLabel: String,
@@ -83,48 +85,20 @@ fun ReedPaintingTimer(
     ghost: Boolean = false,
 ) {
     val context = LocalContext.current
-    val stalkSpecs = remember {
-        runCatching {
-            val json = org.json.JSONObject(
-                context.assets.open("reed_stalks.json").bufferedReader().use { it.readText() },
-            )
-            val arr = json.getJSONArray("stalks")
-            (0 until arr.length()).map { i ->
-                val o = arr.getJSONObject(i)
-                StalkSpec(
-                    file = o.getString("file"),
-                    x = o.getDouble("x").toFloat(), y = o.getDouble("y").toFloat(),
-                    sw = o.getDouble("sw").toFloat(), sh = o.getDouble("sh").toFloat(),
-                    px = o.getDouble("px").toFloat(), py = o.getDouble("py").toFloat(),
-                    rootX = o.getDouble("rootX").toFloat(),
-                    distant = o.getBoolean("distant"),
-                )
-            }
-        }.getOrDefault(emptyList())
+    // 素材加载：**全部在 IO 线程**，并且应用启动时已预热（见 PaintingAssetsLoader）。
+    // 原来这里三块 remember 里直接 decodeStream，切主题那一刻主线程被占 150ms。
+    val assets by produceState(PaintingAssetsLoader.peek(), context) {
+        value = PaintingAssetsLoader.load(context)
     }
-    val base = remember {
-        runCatching {
-            context.assets.open("reed_base.png").use { BitmapFactory.decodeStream(it).asImageBitmap() }
-        }.getOrNull()
-    }
-    val stalks = remember {
-        stalkSpecs.map { s ->
-            runCatching {
-                context.assets.open(s.file).use { BitmapFactory.decodeStream(it).asImageBitmap() }
-            }.getOrNull()
-        }
-    }
-    // 兜底：素材缺失时退回完整原画（无风摆，但画面完整）
-    val fallback = remember(base, stalks) {
-        if (base == null || stalks.any { it == null }) {
-            runCatching {
-                context.assets.open("reed_river.png").use { BitmapFactory.decodeStream(it).asImageBitmap() }
-            }.getOrNull()
-        } else {
-            null
-        }
-    }
+    val stalkSpecs = assets?.specs ?: emptyList()
+    val base = assets?.base
+    val stalks = assets?.stalks ?: emptyList()
+    val fallback = assets?.fallback
     val textMeasurer = rememberTextMeasurer()
+
+    // 进场淡入：画作一出现就满屏动会显得"素材在抖"，2.6s 慢慢起来
+    val ambient = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { ambient.animateTo(1f, tween(2600, easing = FastOutSlowInEasing)) }
 
     val frameTime = remember { mutableStateOf(0L) }
     LaunchedEffect(Unit) {
@@ -163,6 +137,7 @@ fun ReedPaintingTimer(
         ) {
             val ts = frameTime.value
             val wind = (if (reducedMotion) 0f else ReedSceneWind.windAt(ts)) * windAlpha.value
+            val tSecAll = ts * 0.001f
 
             // 纸底
             drawRect(
@@ -171,7 +146,9 @@ fun ReedPaintingTimer(
             )
 
             val img = base ?: fallback
-            if (img != null) {
+            // 🔴 2026-10-25 他要求"计时前完全被遮挡，透不出一点画"：
+            //    待机原来画 8% 的幻影预告，现在干脆整块不画 —— 只有纸底。
+            if (img != null && !ghost) {
                 // 方案 B：竖幅画改为铺满宽度（cover），优先保留底部芦苇/河岸，
                 // 多余高度全部从顶部裁掉。显影光斑、风摆精灵都按同一个 rect 计算，
                 // 裁切后仍与画面对齐。
@@ -187,7 +164,7 @@ fun ReedPaintingTimer(
                     // L1：底画 + 芦苇逐支 + 显影遮罩
                     val l1 = androidx.compose.ui.graphics.Paint().apply {
                         blendMode = BlendMode.SrcOver
-                        alpha = if (ghost) 0.08f else 1f
+                        alpha = 1f
                     }
                     canvas.saveLayer(rect, l1)
 
@@ -209,13 +186,23 @@ fun ReedPaintingTimer(
                             val dstY = dy + s.y * dh
                             val dstW = s.sw * dw
                             val dstH = s.sh * dw
-                            val amp = if (s.distant) 0.45f else 1f
-                            val freq = 0.86f + (s.rootX * 4.7f % 0.36f)
+                            // 2026-10-25 重写：原来是两个正弦硬叠，一支和一支几乎同拍，
+                            // 整片像一块板在晃。现在：
+                            //  · 三个频段：主摆（0.86Hz 量级）+ 次摆（2.3Hz 量级）+ 细颤（5.4Hz 量级）
+                            //    细颤只给近景，远景被空气阻尼吃掉；
+                            //  · 相位按根部 x 派生 → 行波从左向右扫（风是有方向的）；
+                            //  · 每支的"刚度"由自身高度决定：矮的硬、摆得少，高的软、摆得多。
+                            val h = s.sh.coerceIn(0f, 1f)
+                            val amp = (if (s.distant) 0.42f else 1f) * (0.74f + 0.42f * h)
+                            val freq = 0.78f + (s.rootX * 5.3f % 0.44f)
                             val phase = s.rootX * 6.5f
-                            val ang = wind * amp * (
-                                2.2f * sin(tsec * 0.9f * freq - phase) +
-                                    0.55f * sin(tsec * 3.1f * (0.7f + freq * 0.3f) - phase * 1.7f + 0.9f)
-                                )
+                            val bend =
+                                sin(tsec * 0.86f * freq - phase) +
+                                    0.38f * sin(tsec * 2.30f * (0.72f + freq * 0.28f) - phase * 1.7f + 0.9f) +
+                                    0.13f * sin(tsec * 5.40f * (0.90f + freq * 0.20f) - phase * 2.9f + 0.4f) *
+                                    (if (s.distant) 0.35f else 1f)
+                            val stiffness = 0.64f + 0.52f * (1f - h)
+                            val ang = wind * amp * bend * 2.2f / stiffness
                             val pivot = Offset(dstX + s.px * dstW, dstY + s.py * dstH)
                             rotate(ang, pivot = pivot) {
                                 drawImage(
@@ -224,6 +211,20 @@ fun ReedPaintingTimer(
                                     dstSize = IntSize(dstW.toInt(), dstH.toInt()),
                                 )
                             }
+                        }
+                    }
+
+                    // 🔴 这里原来还有一层「L2 显影遮罩」（DstIn 软边光斑按作画顺序洇开）。
+                    //    2026-10-25 他要求去掉：那层白雾在倒计时/番茄前半程一直盖着画，
+                    //    观感像在"洗"一张画。现在只保留 L1 一次 restore。
+                    // ── 活的层面（2026-10-25）─────────────────────────────
+                    // 雾气（全域）/ 河面高光与涟漪（水域遮罩）/ 岸草风扫（植被遮罩）。
+                    // 它们都画在 L1 图层内、紧接着被显影遮罩一起"洗"掉，
+                    // 所以待机和刚开场时不会有一块地方自己动。
+                    if (!ghost && ambient.value > 0.01f) {
+                        drawMistDrift(rect, tSecAll, ambient.value)
+                        assets?.waterMask?.let { mask ->
+                            drawRiverLife(mask, rect, tSecAll, wind, ambient.value)
                         }
                     }
 
@@ -357,56 +358,6 @@ private fun DrawScope.drawSeal(
     }
 }
 
-/**
- * 一个显影斑：主斑多段柔边 + 两个按自身方位偏出的伴瓣（[seed] 决定角度）。
- * 伴瓣让轮廓从"正圆"变成有机形状——水洇开不会是一个圆。
- */
-private fun DrawScope.drawRevealBlob(
-    center: Offset,
-    radius: Float,
-    alpha: Float,
-    showLobes: Boolean,
-    seed: Float,
-) {
-    drawCircle(
-        brush = Brush.radialGradient(
-            colorStops = arrayOf(
-                0f to Color.White.copy(alpha = alpha),
-                0.58f to Color.White.copy(alpha = alpha * 0.94f),
-                0.78f to Color.White.copy(alpha = alpha * 0.62f),
-                0.92f to Color.White.copy(alpha = alpha * 0.22f),
-                1f to Color.Transparent,
-            ),
-            center = center,
-            radius = radius,
-        ),
-        radius = radius,
-        center = center,
-    )
-    if (!showLobes) return
-    // 两个伴瓣，角度由 seed（该斑在画面上的位置）决定 → 各斑形状不同
-    val lobeSpecs = floatArrayOf(0.44f, 0.36f)
-    lobeSpecs.forEachIndexed { k, sizeF ->
-        val ang = seed + k * 2.4f
-        val distance = radius * 0.40f
-        val c = Offset(center.x + cos(ang) * distance, center.y + sin(ang) * distance)
-        val rr = radius * sizeF
-        drawCircle(
-            brush = Brush.radialGradient(
-                colorStops = arrayOf(
-                    0f to Color.White.copy(alpha = alpha * 0.46f),
-                    0.66f to Color.White.copy(alpha = alpha * 0.26f),
-                    1f to Color.Transparent,
-                ),
-                center = c,
-                radius = rr,
-            ),
-            radius = rr,
-            center = c,
-        )
-    }
-}
-
 // ── 纸纹（静态叠层） ─────────────────────────────────────────
 private data class PaperFiber(
     val x: Float,
@@ -501,14 +452,6 @@ private fun PaperGrainOverlay(modifier: Modifier = Modifier) {
 }
 
 // ── 风场与显影光斑数据 ───────────────────────────────────────
-private class StalkSpec(
-    val file: String,
-    val x: Float, val y: Float,     // 精灵左上角（画布归一化，x 除以宽、y 除以宽保比例）
-    val sw: Float, val sh: Float,   // 精灵宽高（宽归一化）
-    val px: Float, val py: Float,   // 旋转支点（根部）在精灵内的归一化坐标
-    val rootX: Float,               // 根部 x（画布归一化）→ 行波相位
-    val distant: Boolean,           // 远景穗：摆幅减半
-)
 
 private object ReedSceneWind {
     /**
@@ -523,6 +466,52 @@ private object ReedSceneWind {
             0.16f * sin(tt * 0.0026f + 0.5f)
         val gust = Math.pow(Math.max(0.0, sin(tt * 0.00032f + 0.8f).toDouble()), 6.0).toFloat() * 1.1f
         return base + gust
+    }
+}
+
+private fun DrawScope.drawRevealBlob(
+    center: Offset,
+    radius: Float,
+    alpha: Float,
+    showLobes: Boolean,
+    seed: Float,
+) {
+    drawCircle(
+        brush = Brush.radialGradient(
+            colorStops = arrayOf(
+                0f to Color.White.copy(alpha = alpha),
+                0.58f to Color.White.copy(alpha = alpha * 0.94f),
+                0.78f to Color.White.copy(alpha = alpha * 0.62f),
+                0.92f to Color.White.copy(alpha = alpha * 0.22f),
+                1f to Color.Transparent,
+            ),
+            center = center,
+            radius = radius,
+        ),
+        radius = radius,
+        center = center,
+    )
+    if (!showLobes) return
+    // 两个伴瓣，角度由 seed（该斑在画面上的位置）决定 → 各斑形状不同
+    val lobeSpecs = floatArrayOf(0.44f, 0.36f)
+    lobeSpecs.forEachIndexed { k, sizeF ->
+        val ang = seed + k * 2.4f
+        val distance = radius * 0.40f
+        val c = Offset(center.x + cos(ang) * distance, center.y + sin(ang) * distance)
+        val rr = radius * sizeF
+        drawCircle(
+            brush = Brush.radialGradient(
+                colorStops = arrayOf(
+                    0f to Color.White.copy(alpha = alpha * 0.46f),
+                    0.66f to Color.White.copy(alpha = alpha * 0.26f),
+                    1f to Color.Transparent,
+                ),
+                center = c,
+                radius = rr,
+            ),
+            radius = rr,
+            center = c,
+        )
     }
 }
 

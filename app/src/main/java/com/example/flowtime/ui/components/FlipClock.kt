@@ -60,6 +60,7 @@ import com.example.flowtime.ui.theme.Motion
 import com.example.flowtime.ui.theme.ThemeMode
 import kotlin.math.PI
 import kotlin.math.sin
+import kotlin.math.sqrt
 
 /**
  * 机械翻牌时钟（老式 split-flap）。
@@ -476,26 +477,45 @@ fun FlipClock(
     colors: FlipClockColors = FlipClockDefaults.colors(),
     /** 左右留给外层环/容器的呼吸位，算卡宽时先扣掉 */
     horizontalInset: Dp = 0.dp,
+    /**
+     * 外圈是一个**圆**时的内缘位置：从容器边缘到圆内缘的距离。
+     *
+     * 给了就在上面那条"扣左右边距"之外，再加一道内切约束：
+     * 整行（含四角）必须落进这个圆，且与圆内缘至少留 [fitClearance]。
+     * 🔴 为什么必须有：圆不是矩形 —— 卡片上/下缘处的弦比赤道窄，
+     *    只扣一个固定左右边距（原先是 12dp）时，4 位卡行的行宽会**超过环的直径**
+     *    （360dp 屏：行宽/环径 = 1.06），四角必然切进环描边。
+     *    见 RingTimer 的夜航分支。
+     */
+    fitInset: Dp? = null,
+    /** 卡片四角与圆内缘之间必须留出的空气（只选了 [fitInset] 时生效） */
+    fitClearance: Dp = 10.dp,
+    /**
+     * **始终**带小时栏（2026-10-25 他定：所有主题统一成 `时:分:秒`）。
+     *
+     * 打开后 <1 小时也显示一张 `0` 小时卡，卡数恒为 5 —— 好处是跨过 1 小时
+     * 不再重排（不会被"多出一张卡 → 卡片变窄"吓一跳），而且和其它主题的
+     * `0:45:00` 写法对得上。代价是短计时少一格宽度（84 → 约 72dp）。
+     */
+    alwaysShowHours: Boolean = false,
     /** TalkBack / 读屏用的时间文本；Canvas 画的数字本身没有语义 */
     semanticsLabel: String? = null,
 ) {
     val safe = totalSeconds.coerceAtLeast(0)
-    val hasHours = safe >= 3600
+    // alwaysShowHours：恒占一格小时（0 也画），卡数不随跨小时变化
+    val hasHours = alwaysShowHours || safe >= 3600
     val hours = safe / 3600
     val minutes = (safe % 3600) / 60
     val seconds = safe % 60
-    // 1–9 小时只占一张卡（参考图也是单张 "7"），≥10 小时才两位
-    val hourDigits = when {
-        hours >= 10 -> 2
-        hasHours -> 1
-        else -> 0
-    }
+    // 小时恒占两位（"01:34:00"）：和文本主题的 formatClockHms 对得上，
+    // 也不会出现"单张 0 挂在最前面"那种难看的排法
+    val hourDigits = if (hasHours) 2 else 0
     val slots = hourDigits + 4
     val colonCount = if (hasHours) 2 else 1
     val gapCount = slots + colonCount - 1
     val spokenTime = remember(hasHours, hours, minutes, seconds) {
         if (hasHours) {
-            "%d:%02d:%02d".format(hours, minutes, seconds)
+            "%02d:%02d:%02d".format(hours, minutes, seconds)
         } else {
             "%02d:%02d".format(minutes, seconds)
         }
@@ -512,12 +532,27 @@ fun FlipClock(
         val contentInset = horizontalInset + if (hasHours) 8.dp else 0.dp
         val contentWidth = (maxWidth - contentInset * 2).coerceAtLeast(0.dp)
         val totalFixed = colonWidth * colonCount.toFloat() + gap * gapCount.toFloat()
-        val fittedHeight = if (contentWidth.value.isFinite()) {
-            val maxCardWidth = (contentWidth - totalFixed) / slots.toFloat()
-            (maxCardWidth / cardAspect).coerceAtMost(cardHeight)
+        // ① 宽度上限：整行不能超出可用宽（没有外圈时就是唯一约束）
+        val byWidth = if (contentWidth.value.isFinite()) {
+            (contentWidth - totalFixed) / slots.toFloat() / cardAspect
         } else {
             cardHeight
-        }.coerceAtLeast(32.dp)
+        }
+        // ② 圆内切上限：整行四角必须落进圆（见 FlipClockFit）。
+        //    几何是纯函数，算法与断言都在 FlipClockFitTest 里。
+        val byCircle = if (fitInset == null) {
+            cardHeight
+        } else {
+            FlipClockFit.maxCardHeightInCircle(
+                circleHalfWidth = maxWidth.value / 2f - fitInset.value - fitClearance.value,
+                slots = slots,
+                colonCount = colonCount,
+                cardAspect = cardAspect,
+                colonWidth = colonWidth.value,
+                gap = gap.value,
+            ).dp
+        }
+        val fittedHeight = minOf(byWidth, byCircle, cardHeight).coerceAtLeast(32.dp)
         val cardWidth = fittedHeight * cardAspect
 
         @Composable

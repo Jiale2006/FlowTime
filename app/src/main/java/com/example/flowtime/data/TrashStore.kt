@@ -64,6 +64,18 @@ class TrashStore(dir: File) {
         save(kept.take(MAX_ENTRIES))
     }
 
+    /**
+     * 批量追加（记录页多选删除用）。
+     * 逐条调 [add] 是 O(n²) 次整文件读写，所以合成一次读、一次写。
+     */
+    fun addAll(records: List<FocusRecord>, now: Long = System.currentTimeMillis()) {
+        if (records.isEmpty()) return
+        val ids = records.mapTo(mutableSetOf()) { it.id }
+        val kept = all(now).filter { it.record.id !in ids }.toMutableList()
+        kept.addAll(0, records.map { TrashedRecord(it, now) })
+        save(kept.take(MAX_ENTRIES))
+    }
+
     /** 按原 id 移除（恢复或彻底删除后调用） */
     fun remove(recordId: Long) {
         val kept = all().filter { it.record.id != recordId }

@@ -58,6 +58,7 @@ import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.VolumeUp
 import com.example.flowtime.ui.components.FlowAlertDialog
 import com.example.flowtime.ui.components.HourMinuteWheel
+import com.example.flowtime.ui.components.formatMinutesCompact
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -300,7 +301,7 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenTrash: () -> Unit) {
                         )
                     }
                     Text(
-                        "${settings.defaultDurationMinutes} 分钟",
+                        formatMinutesCompact(settings.defaultDurationMinutes),
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Medium,
                         color = Color.White,
@@ -315,8 +316,8 @@ fun SettingsScreen(viewModel: AppViewModel, onOpenTrash: () -> Unit) {
                 Column(Modifier.weight(1f)) {
                     Text("番茄计时", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
                     Text(
-                        "${settings.pomodoroFocusMinutes} 分钟专注 · " +
-                            "${settings.pomodoroBreakMinutes} 分钟休息 · " +
+                        "${formatMinutesCompact(settings.pomodoroFocusMinutes)} 专注 · " +
+                            "${formatMinutesCompact(settings.pomodoroBreakMinutes)} 休息 · " +
                             "每 ${settings.pomodoroRoundsBeforeLongBreak} 轮长休息",
                         fontSize = 13.sp,
                         color = TextSecondary,
@@ -606,6 +607,12 @@ private fun ThemePickerDialog(
     viewModel: AppViewModel,
     onDismiss: () -> Unit,
 ) {
+    // 面板一弹出就在 IO 线程把水彩素材解好（约 10MB）：用户点「水彩画风」时素材已就绪，
+    // 而这几百毫秒里主线程只是显示面板，不会被解码占住（切主题那下不再掉 150ms 的帧）。
+    val appContext = LocalContext.current.applicationContext
+    LaunchedEffect(Unit) {
+        com.example.flowtime.ui.components.PaintingAssetsLoader.warmUp(appContext)
+    }
     FlowAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("选择主题", fontWeight = FontWeight.Medium) },
@@ -860,14 +867,19 @@ private fun DurationDialog(settings: AppSettings, viewModel: AppViewModel, onDis
         title = { Text("默认专注时长", fontWeight = FontWeight.Medium) },
         text = {
             Column {
-                Text("倒计时用这个时长，正计时与番茄不受影响", fontSize = 12.sp, color = TextSecondary)
+                Text(
+                    "倒计时用这个时长；首页拨过的时长会自动存成最近一次" +
+                        "，正计时与番茄不受影响",
+                    fontSize = 12.sp,
+                    color = TextSecondary,
+                )
                 Spacer(Modifier.height(10.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     options.forEach { m ->
                         FilterChip(
                             selected = minutes == m,
                             onClick = { minutes = m },
-                            label = { Text("$m 分钟") },
+                            label = { Text(formatMinutesCompact(m)) },
                         )
                     }
                 }
@@ -881,7 +893,7 @@ private fun DurationDialog(settings: AppSettings, viewModel: AppViewModel, onDis
                 if (overLimit) {
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        "最长 ${BackfillRules.MAX_MINUTES / 60} 小时，超出会按这个时长记录",
+                        "最长 ${BackfillRules.MAX_MINUTES / 60}h，超出会按这个时长记录",
                         fontSize = 12.sp,
                         color = WarningAmber,
                     )
@@ -929,7 +941,7 @@ private fun PomodoroDialog(settings: AppSettings, viewModel: AppViewModel, onDis
                 Spacer(Modifier.height(6.dp))
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf(15, 20, 25, 30, 45, 60).forEach { m ->
-                        FilterChip(selected = focus == m, onClick = { focus = m }, label = { Text("$m 分钟") })
+                        FilterChip(selected = focus == m, onClick = { focus = m }, label = { Text(formatMinutesCompact(m)) })
                     }
                 }
                 Spacer(Modifier.height(12.dp))
@@ -940,7 +952,7 @@ private fun PomodoroDialog(settings: AppSettings, viewModel: AppViewModel, onDis
                         FilterChip(
                             selected = shortBreak == m,
                             onClick = { shortBreak = m },
-                            label = { Text("$m 分钟") },
+                            label = { Text(formatMinutesCompact(m)) },
                         )
                     }
                 }
@@ -952,7 +964,7 @@ private fun PomodoroDialog(settings: AppSettings, viewModel: AppViewModel, onDis
                         FilterChip(
                             selected = longBreak == m,
                             onClick = { longBreak = m },
-                            label = { Text("$m 分钟") },
+                            label = { Text(formatMinutesCompact(m)) },
                         )
                     }
                 }
@@ -966,7 +978,8 @@ private fun PomodoroDialog(settings: AppSettings, viewModel: AppViewModel, onDis
                 }
                 Spacer(Modifier.height(12.dp))
                 Text(
-                    "当前节奏：$focus 分钟专注 → $shortBreak 分钟休息，每 $rounds 轮换成 $longBreak 分钟长休息。",
+                    "当前节奏：${formatMinutesCompact(focus)} 专注 → ${formatMinutesCompact(shortBreak)} 休息，" +
+                        "每 $rounds 轮换成 ${formatMinutesCompact(longBreak)} 长休息。",
                     fontSize = 12.sp,
                     color = TextSecondary,
                 )
@@ -1211,12 +1224,13 @@ private fun AboutDialog(version: String, onDismiss: () -> Unit) {
 
 // ---- 小工具 ----
 
-/** 目标时长文案：90 分钟显示为 1.5 小时 */
-private fun goalLabel(minutes: Int): String = if (minutes % 60 == 0) {
-    "${minutes / 60} 小时"
-} else {
-    "%.1f 小时".format(minutes / 60f)
-}
+/**
+ * 目标时长文案：走全站同一套（`45min` / `1h 30min`）。
+ *
+ * 🔴 原来这里是 `1 小时` / `1.5 小时`（小数小时）—— 全 App 唯一用小数小时的地方，
+ *    和统计页的 `30 min`、时长按钮的 `1h45m` 又是两套。2026-10-25 统一。
+ */
+private fun goalLabel(minutes: Int): String = formatMinutesCompact(minutes)
 
 /** 应用版本号（不依赖 BuildConfig，构建未开 buildConfig 也能用） */
 private fun appVersion(context: Context): String = runCatching {

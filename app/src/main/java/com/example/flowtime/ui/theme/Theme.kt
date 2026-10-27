@@ -41,6 +41,7 @@ fun FlowTimeTheme(
         ThemeMode.WATERCOLOR -> watercolorScheme(palette)
         ThemeMode.MONO -> monoScheme(palette)
         ThemeMode.PARTICLES -> particleScheme(palette)
+        ThemeMode.IMPERIAL -> imperialScheme(palette)
     }
     SceneSystemBarsEffect(palette)
     MaterialTheme(
@@ -163,6 +164,33 @@ private fun particleScheme(p: AppPalette) = darkColorScheme(
     surfaceContainer = Color(0xFF0F1419),
     surfaceContainerHigh = Color(0xFF161D2B),
     surfaceContainerHighest = Color(0xFF1E2738),
+    outline = p.dividerColor,
+    outlineVariant = p.borderColor,
+    error = p.errorRed,
+)
+
+/** 宫廷御制（玄青深底 + 鎏金唯一正色；容器档取深漆阶）*/
+private fun imperialScheme(p: AppPalette) = darkColorScheme(
+    primary = p.primary,
+    onPrimary = ImperialOnGold,
+    primaryContainer = p.cardGreenLight,
+    onPrimaryContainer = ImperialGoldBright,
+    secondary = p.accentGreen,
+    onSecondary = ImperialInk,
+    secondaryContainer = ImperialLacquer,
+    onSecondaryContainer = Color(0xFFD8E6E0),
+    tertiary = p.warningAmber,
+    onTertiary = ImperialInk,
+    background = p.bgPrimary,
+    onBackground = p.textPrimary,
+    surface = p.surfaceCard,
+    onSurface = p.textPrimary,
+    surfaceVariant = p.cardCream,
+    onSurfaceVariant = p.textSecondary,
+    surfaceContainerLow = ImperialNavBar,
+    surfaceContainer = ImperialLacquer,
+    surfaceContainerHigh = ImperialLacquerHigh,
+    surfaceContainerHighest = Color(0xFF20302C),
     outline = p.dividerColor,
     outlineVariant = p.borderColor,
     error = p.errorRed,
@@ -333,6 +361,50 @@ private fun typographyFor(mode: ThemeMode): Typography = when (mode) {
             fontSize = 12.sp, lineHeight = 18.sp,
         ),
     )
+    // 宫廷御制：标题衬线 semibold + 宽字距（庄重），正文无衬线 light，
+    // 标签性小字字距 0.25em（≈ 4sp）—— 靠留白与秩序显贵，不靠纹样
+    ThemeMode.IMPERIAL -> Typography(
+        headlineLarge = TextStyle(
+            fontFamily = FontFamily.Serif, fontWeight = FontWeight.SemiBold,
+            fontSize = 28.sp, lineHeight = 36.sp, letterSpacing = 1.sp,
+        ),
+        headlineMedium = TextStyle(
+            fontFamily = FontFamily.Serif, fontWeight = FontWeight.SemiBold,
+            fontSize = 24.sp, lineHeight = 32.sp, letterSpacing = 1.sp,
+        ),
+        headlineSmall = TextStyle(
+            fontFamily = FontFamily.Serif, fontWeight = FontWeight.SemiBold,
+            fontSize = 20.sp, lineHeight = 28.sp, letterSpacing = 0.8.sp,
+        ),
+        titleLarge = TextStyle(
+            fontFamily = FontFamily.Serif, fontWeight = FontWeight.SemiBold,
+            fontSize = 20.sp, lineHeight = 28.sp, letterSpacing = 0.8.sp,
+        ),
+        titleMedium = TextStyle(
+            fontFamily = FontFamily.Serif, fontWeight = FontWeight.Medium,
+            fontSize = 16.sp, lineHeight = 24.sp, letterSpacing = 0.4.sp,
+        ),
+        bodyLarge = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Light,
+            fontSize = 16.sp, lineHeight = 26.sp,
+        ),
+        bodyMedium = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Light,
+            fontSize = 14.sp, lineHeight = 22.sp,
+        ),
+        bodySmall = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Light,
+            fontSize = 12.sp, lineHeight = 18.sp,
+        ),
+        labelLarge = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal,
+            fontSize = 14.sp, lineHeight = 20.sp, letterSpacing = 1.sp,
+        ),
+        labelMedium = TextStyle(
+            fontFamily = FontFamily.SansSerif, fontWeight = FontWeight.Normal,
+            fontSize = 12.sp, lineHeight = 16.sp, letterSpacing = 4.sp,
+        ),
+    )
     else -> Typography
 }
 
@@ -369,6 +441,14 @@ private fun shapesFor(mode: ThemeMode): Shapes = when (mode) {
     ThemeMode.MONO -> Shapes(
         small = RoundedCornerShape(12.dp),
     )
+    // 宫廷御制：rounded-2xl / rounded-3xl 一档，没有更小或更大的圆角
+    ThemeMode.IMPERIAL -> Shapes(
+        extraSmall = RoundedCornerShape(16.dp),
+        small = RoundedCornerShape(16.dp),
+        medium = RoundedCornerShape(20.dp),
+        large = RoundedCornerShape(24.dp),
+        extraLarge = RoundedCornerShape(24.dp),
+    )
     else -> Shapes()
 }
 
@@ -382,8 +462,9 @@ private fun SceneSystemBarsEffect(palette: AppPalette) {
     SideEffect {
         val activity = view.context as? ComponentActivity ?: return@SideEffect
         val window = activity.window
-        // 深色主题（夜航 / 粒子系统）→ 浅色系统图标；窗口底色取各自的主题底，冷启动不闪错色
+        // 深色主题（夜航 / 粒子系统 / 宫廷御制）→ 浅色系统图标；窗口底色取各自的主题底，冷启动不闪错色
         if (palette.mode == ThemeMode.NOCTURNE || palette.mode == ThemeMode.PARTICLES
+            || palette.mode == ThemeMode.IMPERIAL
         ) {
             window.setBackgroundDrawable(ColorDrawable(palette.bgPrimary.toArgb()))
             activity.enableEdgeToEdge(

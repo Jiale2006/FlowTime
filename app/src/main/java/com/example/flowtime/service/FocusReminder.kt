@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.example.flowtime.MainActivity
 import com.example.flowtime.R
+import com.example.flowtime.ui.components.formatMinutesCompact
 import java.util.Calendar
 
 /**
@@ -109,7 +110,7 @@ object FocusReminder {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val text = if (goalMinutes > 0) {
-            "今天的目标 ${goalMinutes} 分钟，来一段专注吧"
+            "今天的目标 ${formatMinutesCompact(goalMinutes)}，来一段专注吧"
         } else {
             "来一段专注，把注意力收回当下"
         }

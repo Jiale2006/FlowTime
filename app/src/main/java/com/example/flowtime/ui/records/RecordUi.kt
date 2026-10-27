@@ -1,6 +1,5 @@
 package com.example.flowtime.ui.records
 
-import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -22,9 +21,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,22 +41,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.flowtime.data.BackfillRules
 import com.example.flowtime.data.FocusRecord
-import com.example.flowtime.data.RecordSource
 import com.example.flowtime.ui.components.BlurDialogBehind
 import com.example.flowtime.ui.components.DurationWheelBlock
-import com.example.flowtime.ui.components.formatMinutesHm
+import com.example.flowtime.ui.components.formatMinutesCompact
 import com.example.flowtime.ui.components.pressScale
 import com.example.flowtime.ui.components.softShadow
 import com.example.flowtime.ui.theme.AccentGreen
 import com.example.flowtime.ui.theme.ActivePalette
-import com.example.flowtime.ui.theme.CardGreenLight
 import com.example.flowtime.ui.theme.Dimens
 import com.example.flowtime.ui.theme.DividerColor
 import com.example.flowtime.ui.theme.PaperElevated
@@ -82,10 +81,13 @@ fun recordRangeText(record: FocusRecord, zone: ZoneId = ZoneId.systemDefault()):
 }
 
 /**
- * 记录行：左侧圆点 + 时间区间 + 时长；手动补录的记录带一个「补」标签（无其它视觉差异）。
+ * 记录行：左侧圆点 + 时间区间 + 时长。
  *
+ * - **手动补录与真实计时一视同仁**（2026-10-25 他定）：不再带「补」标签，
+ *   两者在列表里长得完全一样。补录只是另一种记法，不是需要被标记的异常。
+ * - **点按改时长**（真实计时也开放 —— 误触的倒计时跑完一趟只能靠这个救回来）
  * - **长按删除**（删除后可撤销，见 [RecordUndoBar]）
- * - **点按改时长**，仅对手动补录的记录开放；真实计时点一下会说明原因，不留"点了没反应"
+ * - [selected] 非 null = 多选模式：行首换成勾选圈，点按 = 切换勾选，长按失效
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -97,39 +99,36 @@ fun RecordRow(
     modifier: Modifier = Modifier,
     /** 该记录的任务已被删除（回收站里待恢复 / 已彻底删）——列表上要看得出来 */
     taskDeleted: Boolean = false,
+    /** 多选模式（记录页右上角「编辑」）：null = 普通模式 */
+    selected: Boolean? = null,
+    onToggleSelect: () -> Unit = {},
 ) {
-    val context = LocalContext.current
-    val editable = BackfillRules.canEditDuration(record)
+    val picking = selected != null
     Row(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .combinedClickable(
-                onClick = {
-                    if (editable) {
-                        onEditDuration()
-                    } else {
-                        Toast.makeText(
-                            context,
-                            "真实计时记录的时长不可修改，长按可以删除",
-                            Toast.LENGTH_SHORT,
-                        ).show()
-                    }
-                },
-                onLongClick = onDelete,
+                onClick = { if (picking) onToggleSelect() else onEditDuration() },
+                onLongClick = if (picking) null else onDelete,
             )
             .padding(vertical = 10.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            Modifier
-                .size(8.dp)
-                .clip(CircleShape)
-                // 圆点不再按来源变色：补录与真实计时在列表里长得一样，
-                // 唯一线索是「补」标签（用户要求"只留一个标签"）
-                .background(AccentGreen),
-        )
-        Spacer(Modifier.width(10.dp))
+        if (picking) {
+            SelectMark(selected == true)
+            Spacer(Modifier.width(8.dp))
+        } else {
+            Box(
+                Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    // 圆点不再按来源变色：补录与真实计时在列表里长得一样，也不再加「补」标签；
+                    // 用户要的就是"一视同仁"，来源只留在数据里（改时长等逻辑仍需区分）。
+                    .background(AccentGreen),
+            )
+            Spacer(Modifier.width(10.dp))
+        }
         Column(Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (showTaskName) {
@@ -154,17 +153,6 @@ fun RecordRow(
                     }
                     Spacer(Modifier.width(6.dp))
                 }
-                if (record.recordSource == RecordSource.MANUAL) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(CardGreenLight)
-                            .padding(horizontal = 5.dp, vertical = 1.dp),
-                    ) {
-                        Text("补", fontSize = 10.sp, color = Primary)
-                    }
-                    Spacer(Modifier.width(6.dp))
-                }
                 Text(
                     recordRangeText(record),
                     fontSize = 12.sp,
@@ -176,11 +164,37 @@ fun RecordRow(
         }
         Spacer(Modifier.width(8.dp))
         Text(
-            formatMinutesHm(record.minutes),
+            formatMinutesCompact(record.minutes),
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
             color = TextPrimary,
         )
+    }
+}
+
+/** 多选勾选标记：空心圆 → 实心 + 白勾（记录页 / 回收站共用） */
+@Composable
+fun SelectMark(selected: Boolean) {
+    Box(
+        modifier = Modifier
+            .size(20.dp)
+            .clip(CircleShape)
+            .background(if (selected) Primary else Color.Transparent)
+            .border(
+                width = 1.5.dp,
+                color = if (selected) Color.Transparent else DividerColor,
+                shape = CircleShape,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (selected) {
+            Icon(
+                Icons.Default.Check,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(13.dp),
+            )
+        }
     }
 }
 

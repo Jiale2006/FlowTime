@@ -10,11 +10,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,21 +26,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
-import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
@@ -51,24 +41,19 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.flowtime.ui.theme.AccentGreen
 import com.example.flowtime.ui.theme.ActivePalette
-import com.example.flowtime.ui.theme.CardGreenLight
 import com.example.flowtime.ui.theme.ChampagneBright
-import com.example.flowtime.ui.theme.MonoGray200
+import com.example.flowtime.ui.theme.ImperialGold
 import com.example.flowtime.ui.theme.MonoInk
 import com.example.flowtime.ui.theme.ParticleBlue
 import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.PrimaryLight
 import com.example.flowtime.ui.theme.TextPrimary
 import com.example.flowtime.ui.theme.ThemeMode
-import com.example.flowtime.ui.theme.WatercolorInk
 import com.example.flowtime.ui.theme.WatercolorRose
-import kotlin.math.cos
-import kotlin.math.sin
 
 /**
  * 单色极简的计时线宽：**计时就是单色的一根线**（用户 2026-10-16 定），
@@ -83,11 +68,21 @@ private val MonoLineWidth = 2.dp
 private val ParticleLineWidth = 3.dp
 
 /**
- * 玻璃拟态的环线宽（2026-10-17 按"完全苹果"改）：Apple 计时器的环是**一条等宽细线**，
- * 不是 14dp 的管。直径约 280dp 的环上 Apple 的比例接近 3%，取 8dp。
- * 与 [MonoLineWidth]/[ParticleLineWidth] 一样，不跟随 strokeWidth 形参。
+ * 玻璃拟态的环线宽（2026-10-24 表壳化）：环不再是"发光细带"，而是翻牌钟的表壳。
+ * 实体卡片的描边只有 1px，环若维持 8dp 圆头就成了另一种材质语言；
+ * 收到 6dp、平头收口，进度靠**宽度**压过 1.5dp 的发丝轨道，不靠亮度堆叠。
+ * 6dp 而不是 4dp：翻牌的冒号圆点约 6.7dp，进度线若比标点还细，层级就反了。
  */
-private val NocturneLineWidth = 8.dp
+private val NocturneLineWidth = 6.dp
+
+/** 表壳轨道：一圈发丝线，只交代"总时长"，与卡片的 1px 描边同一种线条。 */
+private val NocturneTrackWidth = 1.5.dp
+
+/**
+ * 宫廷御制的环线宽：3dp 描金细弧。提示词「鎏金只做章」—— 金色是细线，
+ * 不是 14dp 的金镏子；轨道也是同宽的金 10% 发丝线。
+ */
+private val ImperialLineWidth = 3.dp
 
 /**
  * 环形倒计时（教程 §3.1）：底色弧 + 渐变进度弧，圆角线帽，弧首定位点，中央大号时间。
@@ -137,15 +132,29 @@ fun RingTimer(
     val particleLinePx = with(LocalDensity.current) { ParticleLineWidth.toPx() }
     // 玻璃拟态：Apple 式单笔环的线宽
     val nocturneLinePx = with(LocalDensity.current) { NocturneLineWidth.toPx() }
+    // 表壳轨道：发丝线（只交代总时长）
+    val nocturneTrackPx = with(LocalDensity.current) { NocturneTrackWidth.toPx() }
+    // 宫廷御制：描金细弧的像素宽
+    val imperialLinePx = with(LocalDensity.current) { ImperialLineWidth.toPx() }
     val clamped = progress.coerceIn(0f, 1f)
 
     // ---- 主题动效参数：水彩=液态缓动（≥500ms ease-in-out，禁快速缓动）----
     // 其余主题的节奏等各自提示词到位后再单独调制。
     val mode = ActivePalette.mode
+    // 🔴 环的边距必须按**本主题实际线宽**算：`strokeWidth` 形参是 14dp 的"管"，
+    //    玻璃拟态的环只有 6dp。沿用 14dp 那套会平白缩掉 11dp 半径 —— 而 11dp
+    //    在屏幕上正好就是"卡片压环"的那点余量（360dp 屏，半径 127.6 → 138.8）。
+    val ringInsetPx = if (mode == ThemeMode.NOCTURNE) {
+        nocturneLinePx / 2f + nocturneLinePx * 0.9f
+    } else {
+        strokePx / 2f + strokePx * 0.9f
+    }
+    val ringInsetDp = with(LocalDensity.current) { ringInsetPx.toDp() }
+    val nocturneHalfLineDp = with(LocalDensity.current) { (nocturneLinePx / 2f).toDp() }
     val dimFadeMs = when (mode) {
         // 玻璃拟态禁用短促缓动（状态过渡要有"流体"感）。
         // 单色极简：Deliberate Slowness（风格规范 duration-500~700 的慢节奏）
-        ThemeMode.WATERCOLOR, ThemeMode.NOCTURNE, ThemeMode.MONO -> 600
+        ThemeMode.NOCTURNE, ThemeMode.MONO -> 600
         // 粒子系统：Quantum Snap —— 提示词要求前景反馈精确快速（duration-150~200）。
         // 这条只管"控件级状态反馈"（暂停/恢复的整体降透明），跳秒数字另算（见 tickFadeMs）。
         ThemeMode.PARTICLES -> 200
@@ -180,6 +189,10 @@ fun RingTimer(
         // 粒子系统：恒冷蓝（用户选的是"单色冷蓝细环"）。收尾不引暖色 ——
         // 提示词禁暖色/大地色主调，红粉会直接破掉"深空"的冷。
         ParticleBlue
+    } else if (mode == ThemeMode.IMPERIAL) {
+        // 宫廷御制：恒鎏金（唯一正色）。环随进度变色会把第二面色引进深宫，
+        // 紧迫感由进度长度自己表达，不靠"变红"。
+        ImperialGold
     } else {
         val pigmentP = pigmentProgress.coerceIn(0f, 1f)
         val settled = lerp(AccentGreen, Primary, (pigmentP / 0.85f).coerceIn(0f, 1f))
@@ -210,268 +223,30 @@ fun RingTimer(
         // 不再用 graphicsLayer 承载整体透明度：整块图层在页面切换时容易留下残影。
         // 改成把 ringAlpha 直接乘进每次绘制的颜色里 —— 视觉一致，但不需要图层。
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val ringA = ringAlpha
-            val inset = strokePx / 2 + strokePx * 0.9f
+            val inset = ringInsetPx
             val arcSize = Size(size.width - inset * 2, size.height - inset * 2)
-            val topLeft = Offset(inset, inset)
-            val radius = arcSize.minDimension / 2
-            val center = Offset(size.width / 2, size.height / 2)
-            val doodle = mode == ThemeMode.DOODLE
-
-            // 底色弧。玻璃拟态 = **Apple 式底轨**：一整圈等宽细线（白 10%、圆头）。
-            // 🔴 原来那套玻璃管（白 8% 管体 + 内外管壁 + 顶缘受光）已按"完全苹果"删除 ——
-            //    Apple 的环只有两笔：一条轨道 + 一条进度，靠**宽度和明度**分层，不靠拟物光感。
-            if (mode == ThemeMode.NOCTURNE) {
-                drawArc(
-                    color = Color.White.copy(alpha = 0.10f * ringA),
-                    startAngle = 0f, sweepAngle = 360f, useCenter = false,
-                    topLeft = topLeft, size = arcSize,
-                    style = Stroke(width = nocturneLinePx, cap = StrokeCap.Round),
-                )
-            } else if (mode == ThemeMode.PARTICLES) {
-                // 粒子系统（2B）：底轨 = 一根极淡冷蓝细线，整圈、圆头。
-                // 只用来交代"总时长有多长"；屏幕上唯一的亮点是上面那条带外缘辉光的进度弧。
-                drawArc(
-                    color = ParticleBlue.copy(alpha = 0.16f * ringA),
-                    startAngle = 0f,
-                    sweepAngle = 360f,
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = arcSize,
-                    style = Stroke(width = particleLinePx, cap = StrokeCap.Round),
-                )
-            } else if (mode == ThemeMode.MONO) {
-                // 单色极简：底轨 = 一根极浅灰细线（#E5E5E5），整圈、平头。
-                // 只用来交代"总时长有多长"，上面压的墨黑线才是进度。
-                drawArc(
-                    color = MonoGray200.copy(alpha = 0.9f * ringA),
-                    startAngle = 0f,
-                    sweepAngle = 360f,
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = arcSize,
-                    style = Stroke(width = monoLinePx, cap = StrokeCap.Butt),
-                )
-            } else {
-                drawArc(
-                    color = CardGreenLight.copy(alpha = 0.7f * ringA),
-                    startAngle = 0f,
-                    sweepAngle = 360f,
-                    useCenter = false,
-                    topLeft = topLeft,
-                    size = arcSize,
-                    style = Stroke(width = strokePx, cap = StrokeCap.Round),
-                )
-            }
-
-            // 渐变进度弧（从顶部顺时针）：半透明叠色
-            if (clamped > 0f) {
-                val sweep = 360f * clamped
-                val gradient = Brush.sweepGradient(
-                    colors = listOf(pigmentLight, pigmentBase, pigmentLight),
-                    center = center,
-                )
-                // 主笔触（玻璃拟态走"管内液体光"、单色极简走单根细线、
-                // 粒子系统走带辉光的冷蓝细环，三者都不叠这条通用粗主笔）
-                if (mode != ThemeMode.NOCTURNE &&
-                    mode != ThemeMode.MONO && mode != ThemeMode.PARTICLES
-                ) {
-                    drawArc(
-                        brush = gradient,
-                        startAngle = -90f,
-                        sweepAngle = sweep,
-                        useCenter = false,
-                        topLeft = topLeft,
-                        size = arcSize,
-                        alpha = 0.72f * ringA,
-                        style = Stroke(width = strokePx, cap = StrokeCap.Round),
-                    )
-                }
-
-                when (mode) {
-                    // 水彩：两道错位虚线的"补笔" + 内外缘沉淀细弧（渗色与边缘沉积）
-                    ThemeMode.WATERCOLOR -> {
-                        drawArc(
-                            brush = gradient,
-                            startAngle = -90f,
-                            sweepAngle = sweep,
-                            useCenter = false,
-                            topLeft = topLeft,
-                            size = arcSize,
-                            alpha = 0.36f * ringA,
-                            style = Stroke(
-                                width = strokePx * 0.55f,
-                                cap = StrokeCap.Round,
-                                pathEffect = PathEffect.dashPathEffect(
-                                    floatArrayOf(strokePx * 2.4f, strokePx * 1.6f),
-                                ),
-                            ),
-                        )
-                        drawArc(
-                            brush = gradient,
-                            startAngle = -90f,
-                            sweepAngle = sweep,
-                            useCenter = false,
-                            topLeft = topLeft,
-                            size = arcSize,
-                            alpha = 0.30f * ringA,
-                            style = Stroke(
-                                width = strokePx * 0.34f,
-                                cap = StrokeCap.Round,
-                                pathEffect = PathEffect.dashPathEffect(
-                                    floatArrayOf(strokePx * 1.3f, strokePx * 1.9f),
-                                    strokePx * 1.7f,
-                                ),
-                            ),
-                        )
-                        val edgeInsetOut = inset - strokePx * 0.30f
-                        val edgeInsetIn = inset + strokePx * 0.30f
-                        drawArc(
-                            color = pigmentBase,
-                            startAngle = -90f,
-                            sweepAngle = sweep,
-                            useCenter = false,
-                            topLeft = Offset(edgeInsetOut, edgeInsetOut),
-                            size = Size(size.width - edgeInsetOut * 2, size.height - edgeInsetOut * 2),
-                            alpha = 0.26f * ringA,
-                            style = Stroke(width = strokePx * 0.15f, cap = StrokeCap.Round),
-                        )
-                        drawArc(
-                            color = pigmentBase,
-                            startAngle = -90f,
-                            sweepAngle = sweep,
-                            useCenter = false,
-                            topLeft = Offset(edgeInsetIn, edgeInsetIn),
-                            size = Size(size.width - edgeInsetIn * 2, size.height - edgeInsetIn * 2),
-                            alpha = 0.20f * ringA,
-                            style = Stroke(width = strokePx * 0.15f, cap = StrokeCap.Round),
-                        )
-                    }
-
-                    // 玻璃拟态（Apple 式单笔环）：一条等宽弧、圆头收口，
-                    // 颜色随剩余时间从月光蓝走到香槟（主题色保留），越紧迫越亮。
-                    // 🔴 液体扫光渐变 / 管壁镜面线 / 背光暗缘 三件已删 —— 那是拟物玻璃的加法，
-                    //    Apple 的环只做减法：一笔弧 + 一条底轨就是全部。
-                    //    按住主按钮时整条弧微微一档变亮（Apple 的控件按下也是这个反应，不是自发循环）。
-                    ThemeMode.NOCTURNE -> {
-                        drawArc(
-                            color = pigmentBase,
-                            startAngle = -90f,
-                            sweepAngle = sweep,
-                            useCenter = false,
-                            topLeft = topLeft,
-                            size = arcSize,
-                            alpha = (0.88f + 0.12f * highlightBoost) * ringA,
-                            style = Stroke(width = nocturneLinePx, cap = StrokeCap.Round),
-                        )
-                    }
-
-                    // 手绘涂鸦：两道短虚线叠出蜡笔颗粒（蜡笔的粗粝感）
-                    ThemeMode.DOODLE -> {
-                        drawArc(
-                            brush = gradient,
-                            startAngle = -90f,
-                            sweepAngle = sweep,
-                            useCenter = false,
-                            topLeft = topLeft,
-                            size = arcSize,
-                            alpha = 0.45f * ringA,
-                            style = Stroke(
-                                width = strokePx * 0.8f,
-                                cap = StrokeCap.Round,
-                                pathEffect = PathEffect.dashPathEffect(
-                                    floatArrayOf(strokePx * 0.9f, strokePx * 0.45f),
-                                ),
-                            ),
-                        )
-                        drawArc(
-                            brush = gradient,
-                            startAngle = -90f,
-                            sweepAngle = sweep,
-                            useCenter = false,
-                            topLeft = topLeft,
-                            size = arcSize,
-                            alpha = 0.35f * ringA,
-                            style = Stroke(
-                                width = strokePx * 0.5f,
-                                cap = StrokeCap.Round,
-                                pathEffect = PathEffect.dashPathEffect(
-                                    floatArrayOf(strokePx * 0.5f, strokePx * 0.7f),
-                                    strokePx * 0.6f,
-                                ),
-                            ),
-                        )
-                    }
-
-                    // 单色极简：**计时就是单色的一根线**（用户 2026-10-16 定）。
-                    // 2dp 墨黑细线自顶部顺时针生长，平头、无渐变、无端点圆点；
-                    // 全程恒色（规范：禁一切色相 / Line Growth 细线延展）。
-                    ThemeMode.MONO -> {
-                        drawArc(
-                            color = pigmentBase,
-                            startAngle = -90f,
-                            sweepAngle = sweep,
-                            useCenter = false,
-                            topLeft = topLeft,
-                            size = arcSize,
-                            alpha = ringA,
-                            style = Stroke(width = monoLinePx, cap = StrokeCap.Butt),
-                        )
-                    }
-
-                    // 粒子系统（2B）：冷蓝细环 + 外缘一圈极淡辉光，精密仪器感。
-                    // 不叠渐变、不加弧首能量核 —— 环上动态一律不做（2026-10-14 定的环区纯静态）。
-                    ThemeMode.PARTICLES -> {
-                        // 外缘辉光：同色、更宽、更淡的一道弧，托在进度弧外侧。
-                        // 用单层而非多层同心弧 —— 多层硬边叠出来的亮度剖面是台阶状，放大能数出圈数。
-                        val glowIns = inset - particleLinePx * 0.55f
-                        drawArc(
-                            color = ParticleBlue.copy(alpha = 0.20f * ringA),
-                            startAngle = -90f,
-                            sweepAngle = sweep,
-                            useCenter = false,
-                            topLeft = Offset(glowIns, glowIns),
-                            size = Size(size.width - glowIns * 2, size.height - glowIns * 2),
-                            style = Stroke(width = particleLinePx * 3.2f, cap = StrokeCap.Round),
-                        )
-                        // 进度细线本体
-                        drawArc(
-                            color = pigmentBase,
-                            startAngle = -90f,
-                            sweepAngle = sweep,
-                            useCenter = false,
-                            topLeft = topLeft,
-                            size = arcSize,
-                            alpha = ringA,
-                            style = Stroke(width = particleLinePx, cap = StrokeCap.Round),
-                        )
-                    }
-                }
-
-                // 弧首圆点（涂鸦主题补一个错位的"重描"点，像画了两笔）
-                val headAngle = Math.toRadians((-90f + 360f * clamped).toDouble())
-                val headCenter = Offset(
-                    center.x + (radius * cos(headAngle)).toFloat(),
-                    center.y + (radius * sin(headAngle)).toFloat(),
-                )
-                if (mode != ThemeMode.NOCTURNE && mode != ThemeMode.MONO && mode != ThemeMode.PARTICLES) {
-                    // 弧首圆点。玻璃拟态不留端点（Apple 的环靠**圆头笔画**收口，不另加游标点）；
-                    // 单色极简是"就是一根线"；粒子系统同理（2B 只要冷蓝细环，不要能量核）
-                    drawCircle(
-                        color = pigmentBase.copy(alpha = 0.75f * ringA),
-                        radius = strokePx * 0.52f,
-                        center = headCenter,
-                    )
-                    if (doodle) {
-                        // 涂鸦弧首补一个错位的"重描"点，像画了两笔
-                        drawCircle(
-                            color = pigmentBase.copy(alpha = 0.35f * ringA),
-                            radius = strokePx * 0.48f,
-                            center = headCenter + Offset(strokePx * 0.07f, strokePx * 0.06f),
-                        )
-                    }
-                }
-            }
+            // 环区为纯静态绘制：只有两笔（轨道 + 进度）+ 弧首圆点。
+            // 五套主题各自的画法见 RingPainters.kt —— 本文件只管摆放，不管笔触。
+            // 暂停暗化不用图层透明度，而是把 ringAlpha 乘进每个颜色（防页面切换残影）。
+            val frame = RingFrame(
+                topLeft = Offset(inset, inset),
+                arcSize = arcSize,
+                center = Offset(size.width / 2, size.height / 2),
+                radius = arcSize.minDimension / 2,
+                canvasSize = size,
+                strokePx = strokePx,
+                monoPx = monoLinePx,
+                particlePx = particleLinePx,
+                nocturnePx = nocturneLinePx,
+                nocturneTrackPx = nocturneTrackPx,
+                imperialPx = imperialLinePx,
+                ringAlpha = ringAlpha,
+                highlightBoost = highlightBoost,
+                pigmentBase = pigmentBase,
+                pigmentLight = pigmentLight,
+            )
+            drawRingTrack(mode, frame)
+            drawRingProgress(mode, frame, clamped)
         }
 
         Column(
@@ -484,8 +259,6 @@ fun RingTimer(
             // 玻璃=250ms —— 跳秒是每秒高频更新，motion.md 要求频繁交互少动效，
             // 500ms 交叉淡化会让新旧数字长时间叠印重影，250ms 一闪即过
             val tickFadeMs = when (mode) {
-                // ⚠️ 死值（水彩走 ReedPaintingTimer，见文件头说明）
-                ThemeMode.WATERCOLOR -> 500
                 // ⚠️ 死值：玻璃拟态已改成**竖向滚动 + 弹簧**（见下面的 transitionSpec），
                 //    这个 250 现在只当 else 分支的兜底值，别再拿它描述夜航的观感。
                 ThemeMode.NOCTURNE -> 250
@@ -514,18 +287,14 @@ fun RingTimer(
                         ThemeMode.PARTICLES -> FontFamily.Monospace
                         else -> FontFamily.Serif
                     },
-                    // 水彩走衬线斜体（规范的自检项点了"衬线斜体"）
-                    fontStyle = if (mode == ThemeMode.WATERCOLOR) {
-                        FontStyle.Italic
-                    } else {
-                        FontStyle.Normal
-                    },
                     fontSize = 64.sp,
                     fontWeight = FontWeight.Light,
                     letterSpacing = 2.sp,
                 )
                 val widestPx = maxOf(
-                    textMeasurer.measure("88:88", clockStyle).size.width,
+                    // 时:分:秒 固定 8 字符（2026-10-25 起所有主题都带小时），
+                    // 只量 "88:88" 会让 "0:45:00" 超出槽宽被折行/裁掉
+                    textMeasurer.measure("88:88:88", clockStyle).size.width,
                     textMeasurer.measure("888:88", clockStyle).size.width,
                 )
                 with(density) { widestPx.toDp() } + 8.dp
@@ -533,7 +302,7 @@ fun RingTimer(
             // 数字跳动（跳秒脉冲缩放）已按用户要求移除：每秒放大回缩看着心悸。
             // 保留固定宽度容器与水墨晕影；跳秒时只有文字内容静态更新。
 
-            Box {
+            Box(contentAlignment = Alignment.Center) {
                 // 🔴 玻璃拟态必须**逐位**滚动：整串 AnimatedContent(targetState = "12:34")
                 //    会让 5 个字符一起滑 —— 秒数一变"整块时间"都在动。秒表只该动变化的那一位。
                 if (mode == ThemeMode.NOCTURNE) {
@@ -543,12 +312,20 @@ fun RingTimer(
                     FlipClock(
                         totalSeconds = timeSeconds,
                         animate = flipAnimate,
-                        // 一位一卡（4 张）：84dp 卡高时总宽 ≈336dp，塞进 361dp 屏宽正好
+                        // 一位一卡（4 张）：卡高由**环的内切圆**反推，不再写死 84dp ——
+                        // 84dp 是"环心能塞多大"，但卡片行四角其实顶进了环描边。
                         cardHeight = 84.dp,
                         cornerRadius = 8.dp,
-                        // 给圆环笔画留呼吸位；小时/多卡时按剩余宽度自动缩卡
+                        // 环内缘 = 边距 + 半个描边；卡片四角与它留 10dp 空气。
+                        // 固定扣 12dp 只够赤道用：4 位时行宽 / 环径 = 1.06（行比环还宽）。
+                        fitInset = ringInsetDp + nocturneHalfLineDp,
+                        fitClearance = 10.dp,
                         horizontalInset = 12.dp,
+                        // 时:分:秒 恒 5 位（与其它主题的 formatClock 对齐）
+                        // 不到一小时不占小时卡（他要的 "34:00" 而不是 "0:34:00"）
+                alwaysShowHours = false,
                     )
+                    // 文案挪到环外后就不占环心了（见下面的根 Box 层）
                 } else {
                     AnimatedContent(
                         targetState = timeText,
@@ -565,47 +342,39 @@ fun RingTimer(
                         },
                         label = "timeTick",
                     ) { text ->
-                        if (mode == ThemeMode.WATERCOLOR) {
-                            // 数字水墨感：同色低透明度错位副本垫在主数字后面，
-                            // 像湿墨在纸上洇出的边（对应预览页 fx「数字水墨感」）
-                            Box(
-                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 3.dp),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                ClockText(
-                                    text = text,
-                                    color = WatercolorInk.copy(alpha = 0.12f),
-                                    italic = true,
-                                    modifier = Modifier
-                                        .width(clockWidthDp)
-                                        .offset(x = 4.dp, y = 3.dp)
-                                        // RenderEffect 模糊，API 31+ 生效；低版本退化为硬边错位影
-                                        .blur(1.5.dp),
-                                )
-                                ClockText(
-                                    text = text,
-                                    color = timeColor,
-                                    italic = true,
-                                    modifier = Modifier.width(clockWidthDp),
-                                )
-                            }
-                        } else {
-                            ClockText(
-                                text = text,
-                                color = timeColor,
-                                italic = false,
-                                fontFamily = when (mode) {
-                                    ThemeMode.MONO -> FontFamily.Monospace
-                                    ThemeMode.PARTICLES -> FontFamily.Monospace
-                                    else -> FontFamily.Serif
-                                },
-                                modifier = Modifier.width(clockWidthDp),
-                            )
-                        }
+                        ClockText(
+                            text = text,
+                            color = timeColor,
+                            fontFamily = when (mode) {
+                                // 单色极简与粒子系统走等宽（font-mono）
+                                ThemeMode.MONO -> FontFamily.Monospace
+                                ThemeMode.PARTICLES -> FontFamily.Monospace
+                                else -> FontFamily.Serif
+                            },
+                            modifier = Modifier.width(clockWidthDp),
+                        )
                     }
                 }
             }
-            centerContent?.invoke()
+            // 夜航的文案挂在**根 Box** 上（见下），不跟着卡片列走 ——
+            // 只有挂根 Box，BottomCenter 才是"表盘方块的底边"，才可能落到环外。
+            if (mode != ThemeMode.NOCTURNE) centerContent?.invoke()
+        }
+
+        // 玻璃拟态的文案：环外、表盘正下方（2026-10-25 他定"环里只留表壳+翻牌"）。
+        // 偏移 22dp = 文案高 + 5dp：文案顶边落在方块底边下方 ≈5dp，
+        // 而环的外缘本来就比方块底边高 5.4dp（边距 8.4 − 半个描边 3），
+        // 合起来正好是环下方约 10dp 的空气。
+        // 与数字同样吃 ringAlpha，暂停时一起变暗。
+        if (mode == ThemeMode.NOCTURNE && centerContent != null) {
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .offset(y = 22.dp)
+                    .graphicsLayer { alpha = ringAlpha },
+            ) {
+                centerContent?.invoke()
+            }
         }
     }
 }
@@ -622,7 +391,6 @@ fun RingTimer(
 private fun ClockText(
     text: String,
     color: Color,
-    italic: Boolean,
     modifier: Modifier = Modifier,
     fontFamily: FontFamily = FontFamily.Serif,
 ) {
@@ -631,82 +399,9 @@ private fun ClockText(
         modifier = modifier,
         textAlign = TextAlign.Center,
         fontFamily = fontFamily,
-        fontStyle = if (italic) FontStyle.Italic else FontStyle.Normal,
         fontSize = 64.sp,
         fontWeight = FontWeight.Light,
         letterSpacing = 2.sp,
         color = color,
     )
-}
-
-/**
- * 逐位滚动的时钟数字（玻璃拟态专用）。
- *
- * ⚠️ **2026-10-24 起已被 [FlipClock] 取代**：他要求夜航改用机械翻牌，本函数当前
- *    **没有任何调用者**，保留只为回退参考。不要拿它推断夜航的实际观感。
- *
- * 🔴 为什么必须按位拆开：`AnimatedContent(targetState = timeText)` 的 target 是**整串** "12:34"，
- *    秒数一变整串就换了 → 5 个字符一起滑，等于"整块时间"在动（2026-10-17 他一句
- *    "怎么是整个时间动"点出来的）。这里每一位一个定宽槽位、target 是**单个字符**：
- *    没变的位不产生任何过渡，只有真正变化的那一位（通常是最右位）滚动。
- *
- * 定宽槽位不是多余的：衬线数字不等宽，某位从 1 变 8 会把后面的位往右推。
- */
-@Composable
-private fun RollingClockText(
-    text: String,
-    color: Color,
-    width: Dp,
-) {
-    val density = LocalDensity.current
-    val measurer = rememberTextMeasurer()
-    // 必须与 ClockText 同款样式，否则量出来的宽度和实际绘制对不上
-    val style = remember {
-        TextStyle(
-            fontFamily = FontFamily.Serif,
-            fontSize = 64.sp,
-            fontWeight = FontWeight.Light,
-            letterSpacing = 2.sp,
-        )
-    }
-    val digitWidth = remember(style) {
-        ('0'..'9').maxOf { measurer.measure(it.toString(), style).size.width }
-    }
-    val colonWidth = remember(style) { measurer.measure(":", style).size.width }
-
-    Row(
-        modifier = Modifier.width(width),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        text.forEach { ch ->
-            val slotPx = if (ch.isDigit()) digitWidth else colonWidth
-            // clipToBounds 把进出场裁在槽位内 —— 这才是"滚轮"的样子；
-            // 不裁的话新数字会从下面飘出来压到模式文案上
-            Box(Modifier.width(with(density) { slotPx.toDp() }).clipToBounds()) {
-                if (ch.isDigit()) {
-                    // 同一位上字符没变时，AnimatedContent 不会产生任何过渡帧
-                    AnimatedContent(
-                        targetState = ch,
-                        contentAlignment = Alignment.Center,
-                        transitionSpec = {
-                            // 位移慢、透明度快：滚动放慢到 response≈0.4s（Apple「移动/画中画」档
-                            // stiffness=(2π/0.4)²≈247），但淡入仍是 0.25s —— 否则数字会长时间
-                            // 半透明地晃着，看着发虚。两种速度分开调才是"玻璃"该有的手感。
-                            val roll = spring<IntOffset>(dampingRatio = 1f, stiffness = 247f)
-                            val fade = spring<Float>(dampingRatio = 1f, stiffness = 632f)
-                            (slideInVertically(roll) { it / 5 } + fadeIn(fade)) togetherWith
-                                (slideOutVertically(roll) { -it / 5 } + fadeOut(fade))
-                        },
-                        label = "digitRoll",
-                    ) { c ->
-                        ClockText(text = c.toString(), color = color, italic = false)
-                    }
-                } else {
-                    // 冒号不参与滚动，否则每次跳秒它也跟着动
-                    ClockText(text = ch.toString(), color = color, italic = false)
-                }
-            }
-        }
-    }
 }

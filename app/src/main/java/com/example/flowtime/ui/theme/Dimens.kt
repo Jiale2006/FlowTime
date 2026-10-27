@@ -31,8 +31,8 @@ object Dimens {
     val CardPadding = 16.dp
     /** 紧凑卡片（任务网格块）内边距 */
     val CardPaddingTight = 14.dp
-    /** 任务网格块高度（原 176dp 偏高，收一档后两列比例更舒展） */
-    val GridCardHeight = 152.dp
+    /** 任务网格块高度（176 → 152 → 124：去掉底部短横杠后文字贴底，留出图标下方一行空隙即可） */
+    val GridCardHeight = 124.dp
     /** 列表行/紧凑卡片内边距（与图标块配合得到 72dp 两行行高） */
     val RowPadding = 14.dp
     /** 同组卡片之间的间距 */

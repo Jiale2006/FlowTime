@@ -335,11 +335,11 @@ class BackfillRulesTest {
     // ---- 改时长权限 ----
 
     @Test
-    fun `只有手动补录的记录可以改时长`() {
+    fun `所有记录都可以改时长`() {
         val manual = record(startMs = 0L, endMs = 0L, source = RecordSource.MANUAL)
         val timer = record(startMs = 0L, endMs = 0L, source = RecordSource.TIMER)
         assertTrue(BackfillRules.canEditDuration(manual))
-        assertFalse(BackfillRules.canEditDuration(timer))
+        assertTrue(BackfillRules.canEditDuration(timer))
     }
 
     @Test
@@ -359,9 +359,18 @@ class BackfillRulesTest {
     }
 
     @Test
-    fun `真实计时的记录不给改时长`() {
-        val timer = record(minutes = 30, startMs = 0L, endMs = 30 * 60_000L, source = RecordSource.TIMER)
-        assertNull(BackfillRules.withDuration(timer, 90))
+    fun `真实计时的记录同样按新时长回退开始时刻`() {
+        val end = ms(2026, 10, 9, 15, 0)
+        val timer = record(
+            minutes = 30,
+            startMs = end - 30 * 60_000L,
+            endMs = end,
+            source = RecordSource.TIMER,
+        )
+        val edited = BackfillRules.withDuration(timer, 90)
+        assertEquals(90, edited!!.minutes)
+        assertEquals(end, edited.endEpochMillis)
+        assertEquals(end - 90 * 60_000L, edited.startEpochMillis)
     }
 
     @Test

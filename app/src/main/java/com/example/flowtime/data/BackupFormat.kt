@@ -16,7 +16,7 @@ object BackupFormat {
     const val SCHEMA = 2
 
     /** 设置项字段数。测试拿它当哨兵：加字段忘了同步编解码，测试会红 */
-    const val SETTINGS_FIELD_COUNT = 16
+    const val SETTINGS_FIELD_COUNT = 17
 
     /** 备份校验结果，决定 UI 该说什么 */
     enum class Check { OK, NOT_A_BACKUP, TOO_NEW }
@@ -65,6 +65,7 @@ object BackupFormat {
         .put("avatarPath", s.avatarPath)
         .put("defaultDurationMinutes", s.defaultDurationMinutes)
         .put("taskListView", s.taskListView)
+        .put("freeFocusOrder", s.freeFocusOrder)
         .put("ringtoneEnabled", s.ringtoneEnabled)
         .put("autoStart", s.autoStart)
         .put("dailyGoalMinutes", s.dailyGoalMinutes)
@@ -84,6 +85,7 @@ object BackupFormat {
         avatarPath = o.optString("avatarPath", base.avatarPath),
         defaultDurationMinutes = o.optInt("defaultDurationMinutes", base.defaultDurationMinutes),
         taskListView = o.optBoolean("taskListView", base.taskListView),
+        freeFocusOrder = o.optInt("freeFocusOrder", base.freeFocusOrder),
         ringtoneEnabled = o.optBoolean("ringtoneEnabled", base.ringtoneEnabled),
         autoStart = o.optBoolean("autoStart", base.autoStart),
         dailyGoalMinutes = o.optInt("dailyGoalMinutes", base.dailyGoalMinutes),
@@ -123,6 +125,9 @@ object BackupFormat {
             // parentId 优先；旧数据里叫 categoryId（旧版独立大类表的 id，已迁移为父任务 id）。
             // JSON null 用 optString 会得到字符串 "null"，必须显式判断，否则顶层任务会被误判为子任务。
             parentId = obj.optNullableString("parentId") ?: obj.optNullableString("categoryId"),
+            // 旧备份没有这两个字段：未归档 + sortOrder 0（按插入顺序，与当时一致）
+            archived = obj.optBoolean("archived", false),
+            sortOrder = obj.optInt("sortOrder", 0),
         )
     }
 
@@ -136,7 +141,9 @@ object BackupFormat {
                     .put("dateLabel", task.dateLabel)
                     .put("colorIndex", task.colorIndex)
                     .put("iconIndex", task.iconIndex)
-                    .put("parentId", task.parentId ?: JSONObject.NULL),
+                    .put("parentId", task.parentId ?: JSONObject.NULL)
+                    .put("archived", task.archived)
+                    .put("sortOrder", task.sortOrder),
             )
         }
     }

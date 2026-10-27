@@ -42,7 +42,7 @@ import androidx.compose.ui.unit.sp
 import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.components.FireworksOverlay
 import com.example.flowtime.ui.components.ProCard
-import com.example.flowtime.ui.components.formatMinutesHm
+import com.example.flowtime.ui.components.formatMinutesCompact
 import com.example.flowtime.ui.components.rememberFireworksState
 import com.example.flowtime.ui.theme.BgPrimary
 import com.example.flowtime.ui.theme.CardOrange
@@ -126,7 +126,7 @@ fun CompletionScreen(
                         )
                         Spacer(Modifier.height(16.dp))
                         Text(
-                            "+${formatMinutesHm(record?.minutes ?: 0)}",
+                            "+${formatMinutesCompact(record?.minutes ?: 0)}",
                             fontSize = 44.sp,
                             fontWeight = FontWeight.Medium,
                             color = Primary,

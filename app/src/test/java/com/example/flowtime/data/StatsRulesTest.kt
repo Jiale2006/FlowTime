@@ -115,7 +115,10 @@ class StatsRulesTest {
         )
         val buckets = StatsRules.durationBuckets(list)
         assertEquals(listOf(1, 2, 2, 2, 1), buckets.map { it.count })
-        assertEquals(listOf("<15分", "15-30分", "30-60分", "1-2小时", "≥2小时"), buckets.map { it.label })
+        assertEquals(
+            listOf("<15min", "15-30min", "30-60min", "1-2h", "≥2h"),
+            buckets.map { it.label },
+        )
         assertEquals(8, buckets.sumOf { it.count })
     }
 

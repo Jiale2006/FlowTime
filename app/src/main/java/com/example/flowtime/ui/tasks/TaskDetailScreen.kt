@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -22,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -50,8 +52,8 @@ import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.components.DonutChart
 import com.example.flowtime.ui.components.DonutSlice
 import com.example.flowtime.ui.components.ProCard
-import com.example.flowtime.ui.components.WeeklyBarsPager
-import com.example.flowtime.ui.components.formatMinutesHm
+import com.example.flowtime.ui.components.TrendScrollStrip
+import com.example.flowtime.ui.components.formatMinutesCompact
 import com.example.flowtime.ui.components.pressScale
 import com.example.flowtime.ui.records.BackfillDialog
 import com.example.flowtime.ui.records.DurationEditDialog
@@ -72,6 +74,17 @@ import com.example.flowtime.ui.theme.TextSecondary
 import com.example.flowtime.ui.theme.WarningAmber
 import java.time.Instant
 import java.time.ZoneId
+
+/**
+ * 「专注趋势」图表区固定高度（他 2026-10-26 要"这个窗口定高"）。
+ *
+ * 高度 = 表头行(≈20) + 间隔(10) + 柱区固定槽(130) + 间隔(6) + 日期(≈15) ≈ 181dp，留 3dp 余量。
+ * 🔴 定高的意义：没有记录时只显示「暂无记录」一行，卡片会突然矮一大截；
+ *    数据小（4min）时柱子矮，卡片也跟着缩。现在无数据也占同样的位置，卡片高度恒定。
+ * 🔴 2026-10-27：窗口高度**不变**，被裁的是柱区占位太死。柱区改成吃剩余高度（见 WeeklyBarsPager），
+ *    表头/日期行先占，字体调大时柱区自己让位 —— 「一二三四五六日」不会再被从底部切掉。
+ */
+private val TrendChartHeight = 184.dp
 
 
 /**
@@ -101,14 +114,15 @@ fun TaskDetailScreen(
     val stats = remember(records, task?.id, tasks) {
         task?.let { viewModel.taskStats(it, records, tasks) }
     }
-    val weekPages = remember(records, task?.id, tasks) {
-        viewModel.buildWeekPages(records.filter(belongsToTask))
+    val dayTrend = remember(records, task?.id, tasks) {
+        viewModel.buildDayTrend(records.filter(belongsToTask))
     }
     val childMinutes = remember(records, children) {
         children.associate { child -> child.name to RecordLink.minutesOf(child, records) }
     }
     var showBackfill by remember { mutableStateOf(false) }
     var showEditor by remember { mutableStateOf(false) }
+    var showEditTask by remember { mutableStateOf(false) }
     // 正在改时长的记录（仅手动补录） / 刚被删掉的记录
     var editingRecord by remember { mutableStateOf<FocusRecord?>(null) }
     var deletedRecord by remember { mutableStateOf<FocusRecord?>(null) }
@@ -142,21 +156,34 @@ fun TaskDetailScreen(
                         TaskIcons.Glyph(index = task?.iconIndex ?: 0, size = 24.dp)
                     }
                     Spacer(Modifier.width(10.dp))
-                    Column {
+                    Column(Modifier.weight(1f)) {
                         Text(
                             task?.name ?: "任务不存在",
                             style = MaterialTheme.typography.titleLarge,
                             color = TextPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                         if (task != null) {
                             Text(
-                                if (children.isEmpty()) {
-                                    "${parentTask?.name ?: "未分类"} · ${task.dateLabel}"
-                                } else {
-                                    "${parentTask?.name ?: "未分类"} · ${children.size} 个小任务"
+                                when {
+                                    // 虚拟任务没有 dateLabel（空串），照原样拼会留个「未分类 · 」的尾巴
+                                    task.isFreeFocus -> "没有挂到任务的专注记录都归这里"
+                                    children.isEmpty() -> "${parentTask?.name ?: "未分类"} · ${task.dateLabel}"
+                                    else -> "${parentTask?.name ?: "未分类"} · ${children.size} 个小任务"
                                 },
                                 fontSize = 13.sp,
                                 color = TextSecondary,
+                            )
+                        }
+                    }
+                    // 改名 / 换图标配色。虚拟「自由专注」不落库，没有可编辑的东西
+                    if (task != null && !task.isFreeFocus) {
+                        IconButton(onClick = { showEditTask = true }) {
+                            Icon(
+                                Icons.Default.Edit,
+                                contentDescription = "编辑任务",
+                                tint = TextSecondary,
                             )
                         }
                     }
@@ -190,7 +217,7 @@ fun TaskDetailScreen(
 
                 ProCard(modifier = Modifier.fillMaxWidth()) {
                     Row(Modifier.padding(vertical = 16.dp)) {
-                        DetailStat("总时长", formatMinutesHm(stats?.totalMinutes ?: 0), Modifier.weight(1f))
+                        DetailStat("总时长", formatMinutesCompact(stats?.totalMinutes ?: 0), Modifier.weight(1f))
                         DetailStat("专注次数", "${stats?.sessionCount ?: 0} 次", Modifier.weight(1f))
                         DetailStat(
                             "最近专注",
@@ -231,7 +258,7 @@ fun TaskDetailScreen(
                                                     totalChildMinutes,
                                             )
                                         },
-                                        centerText = formatMinutesHm(totalChildMinutes),
+                                        centerText = formatMinutesCompact(totalChildMinutes),
                                         centerSubtext = "小任务",
                                         modifier = Modifier.weight(0.42f),
                                     )
@@ -263,7 +290,7 @@ fun TaskDetailScreen(
                                                 modifier = Modifier.weight(1f),
                                             )
                                             Text(
-                                                formatMinutesHm(childMinutes[child.name] ?: 0),
+                                                formatMinutesCompact(childMinutes[child.name] ?: 0),
                                                 fontSize = 12.sp,
                                                 color = TextSecondary,
                                             )
@@ -302,12 +329,26 @@ fun TaskDetailScreen(
 
                 ProCard(modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(Dimens.CardPadding)) {
-                        Text("专注趋势（右滑看更早）", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+                        Text("专注趋势", fontSize = 16.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
                         Spacer(Modifier.height(12.dp))
-                        if ((stats?.sessionCount ?: 0) == 0) {
-                            Text("暂无记录", fontSize = 13.sp, color = TextPlaceholder)
-                        } else {
-                            WeeklyBarsPager(pages = weekPages)
+                        // 定高：无记录时「暂无记录」也占满同样的位置，卡片不会忽高忽低。
+                        // 内容顶部对齐（不居中）：多出的几 dp 落在日期行下方，
+                        // 柱子基线、日期行的位置在任何数据下都一样。
+                        // 高度是**死高**：柱区在里面吃剩余空间，字体调大时柱区自己变矮，别让 Pager 裁掉日期行。
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(TrendChartHeight),
+                            contentAlignment = Alignment.TopCenter,
+                        ) {
+                            if ((stats?.sessionCount ?: 0) == 0) {
+                                Text("暂无记录", fontSize = 13.sp, color = TextPlaceholder)
+                            } else {
+                                TrendScrollStrip(
+                                    days = dayTrend,
+                                    modifier = Modifier.fillMaxWidth().fillMaxHeight(),
+                                )
+                            }
                         }
                     }
                 }
@@ -338,7 +379,7 @@ fun TaskDetailScreen(
                         } else {
                             Text(
                                 // 写清"只有 10 条"，免得以为这个任务一共就记了这么点
-                                "最近 ${AppViewModel.RECENT_RECORDS_PREVIEW} 条 · 长按删除 · 点按改时长（仅补录）",
+                                "最近 ${AppViewModel.RECENT_RECORDS_PREVIEW} 条 · 点按改时长 · 长按删除",
                                 fontSize = 11.sp,
                                 color = TextPlaceholder,
                             )
@@ -378,10 +419,9 @@ fun TaskDetailScreen(
                 Button(
                     onClick = {
                         task?.let {
-                            // 虚拟「自由专注」走自由专注路径 —— 直接把 __free_focus__ 当 taskId
-                            // 写进记录的话，会挂一个 tasks 表里不存在的 id
-                            if (it.isFreeFocus) viewModel.selectFreeFocus() else viewModel.selectTask(it.id)
-                            viewModel.startFocus()
+                            // 直接把任务带进 startFocus：selectTask 在计时未结束时会静默拒绝，
+                            // 那样会沿用上一个任务开始计时（通知栏和记录都错在旧任务上）
+                            viewModel.startFocus(if (it.isFreeFocus) null else it.id)
                             onStartFocus()
                         }
                     },
@@ -399,7 +439,7 @@ fun TaskDetailScreen(
         RecordUndoBar(
             visible = deletedRecord != null || lastAdded != null,
             message = when {
-                lastAdded != null -> "已补录 ${formatMinutesHm(lastAdded.minutes)}"
+                lastAdded != null -> "已补录 ${formatMinutesCompact(lastAdded.minutes)}"
                 else -> "已移入回收站"
             },
             accent = if (lastAdded != null) SuccessGreen else WarningAmber,
@@ -439,6 +479,28 @@ fun TaskDetailScreen(
             onConfirm = { minutes ->
                 viewModel.updateRecordDuration(record, minutes)
                 editingRecord = null
+            },
+        )
+    }
+
+    // 编辑当前任务：改名 / 换图标配色（归属不变）
+    if (showEditTask && task != null) {
+        TaskEditorSheet(
+            editing = task,
+            // 编辑态不显示分类选择器，只拿它把「归属」那行的父任务名查出来
+            parentOptions = listOfNotNull(parentTask),
+            defaultColorIndex = task.colorIndex,
+            defaultIconIndex = task.iconIndex,
+            onDismiss = { showEditTask = false },
+            onConfirm = { draft ->
+                viewModel.updateTask(
+                    task.copy(
+                        name = draft.name,
+                        colorIndex = draft.colorIndex,
+                        iconIndex = draft.iconIndex,
+                    ),
+                )
+                showEditTask = false
             },
         )
     }

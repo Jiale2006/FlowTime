@@ -81,8 +81,8 @@ private val NoiseBitmap: Bitmap by lazy {
     Bitmap.createBitmap(pixels, size, size, Bitmap.Config.ARGB_8888)
 }
 
-/** 平铺噪点画笔：REPEAT 平铺 + 6/255 整体透明度 */
-private val NoisePaint: android.graphics.Paint by lazy {
+/** 平铺噪点画笔：REPEAT 平铺 + 6/255 整体透明度（夜航 / 宫廷共用） */
+internal val NoisePaint: android.graphics.Paint by lazy {
     android.graphics.Paint().apply {
         shader = android.graphics.BitmapShader(
             NoiseBitmap,

@@ -111,13 +111,13 @@ object StatsRules {
     /** 单次时长分布的一档 */
     data class DurationBucket(val label: String, val count: Int, val minutes: Int)
 
-    /** 单次时长分桶：<15 / 15-30 / 30-60 / 60-120 / ≥120 分钟 */
+    /** 单次时长分桶：<15min / 15-30min / 30-60min / 60-120min / ≥120min（统计页紧凑写法） */
     fun durationBuckets(records: List<FocusRecord>): List<DurationBucket> = listOf(
-        "<15分" to { m: Int -> m < 15 },
-        "15-30分" to { m: Int -> m in 15..29 },
-        "30-60分" to { m: Int -> m in 30..59 },
-        "1-2小时" to { m: Int -> m in 60..119 },
-        "≥2小时" to { m: Int -> m >= 120 },
+        "<15min" to { m: Int -> m < 15 },
+        "15-30min" to { m: Int -> m in 15..29 },
+        "30-60min" to { m: Int -> m in 30..59 },
+        "1-2h" to { m: Int -> m in 60..119 },
+        "≥2h" to { m: Int -> m >= 120 },
     ).map { (label, test) ->
         val hit = records.filter { test(it.minutes) }
         DurationBucket(label, hit.size, hit.sumOf { it.minutes })

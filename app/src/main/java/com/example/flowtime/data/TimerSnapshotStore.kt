@@ -90,7 +90,37 @@ class TimerSnapshotStore(context: Context) {
         prefs.edit().remove(KEY).apply()
     }
 
+    /**
+     * 通知栏按钮命令的落盘副本。
+     *
+     * 🔴 为什么必须落盘：命令原来只走进程内总线，App 在后台被系统回收后
+     * 服务重建（START_STICKY）而 ViewModel 还没回来，命令无处投递就被丢弃——
+     * 用户点「停止」后那段计时彻底丢失（他报的问题，2026-10-26）。
+     * 现在服务先落盘再广播，VM 处理完清除；VM 晚一步恢复也能补做。
+     */
+    fun savePendingCommand(command: String) {
+        prefs.edit()
+            .putString(PENDING_KEY, command)
+            .putLong(PENDING_AT_KEY, System.currentTimeMillis())
+            .apply()
+    }
+
+    fun loadPendingCommand(): String? = prefs.getString(PENDING_KEY, null)?.takeIf { it.isNotBlank() }
+
+    /** 太旧的命令不再补做（避免几天后打开 App 突然结算一段计时） */
+    fun isPendingFresh(maxAgeMillis: Long = PENDING_MAX_AGE_MILLIS): Boolean =
+        System.currentTimeMillis() - prefs.getLong(PENDING_AT_KEY, 0L) <= maxAgeMillis
+
+    fun clearPendingCommand() {
+        prefs.edit().remove(PENDING_KEY).remove(PENDING_AT_KEY).apply()
+    }
+
     private companion object {
         const val KEY = "snapshot"
+        const val PENDING_KEY = "pending_command"
+        const val PENDING_AT_KEY = "pending_command_at"
+
+        /** 通知栏命令的有效期：2 小时。超过就算陈旧，丢弃。 */
+        const val PENDING_MAX_AGE_MILLIS = 2 * 60 * 60 * 1000L
     }
 }

@@ -2,7 +2,6 @@ package com.example.flowtime.ui.records
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,11 +18,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -39,7 +36,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -53,11 +49,10 @@ import com.example.flowtime.data.TrashedTask
 import com.example.flowtime.ui.AppViewModel
 import com.example.flowtime.ui.components.FlowAlertDialog
 import com.example.flowtime.ui.components.ProCard
-import com.example.flowtime.ui.components.formatMinutesHm
+import com.example.flowtime.ui.components.formatMinutesCompact
 import com.example.flowtime.ui.tasks.TaskIcons
 import com.example.flowtime.ui.theme.CardGreenLight
 import com.example.flowtime.ui.theme.Dimens
-import com.example.flowtime.ui.theme.DividerColor
 import com.example.flowtime.ui.theme.ErrorRed
 import com.example.flowtime.ui.theme.Primary
 import com.example.flowtime.ui.theme.TextPlaceholder
@@ -385,7 +380,7 @@ fun TrashScreen(
             title = { Text("永久删除记录", fontWeight = FontWeight.Medium) },
             text = {
                 Text(
-                    "「${record.taskName}」这条记录（${formatMinutesHm(record.minutes)}，" +
+                    "「${record.taskName}」这条记录（${formatMinutesCompact(record.minutes)}，" +
                         "${recordRangeText(record)}）会被彻底删掉，找不回来了。",
                     fontSize = 14.sp,
                     color = TextSecondary,
@@ -421,7 +416,7 @@ fun TrashScreen(
                         if (own.isNotEmpty()) {
                             append(
                                 "\n\n它名下的 ${own.size} 条记录会回到「未分类」（累计 " +
-                                    "${formatMinutesHm(own.sumOf { it.minutes })}），" +
+                                    "${formatMinutesCompact(own.sumOf { it.minutes })}），" +
                                     "时长不会丢，只是不再挂在任何任务上。",
                             )
                         }
@@ -549,7 +544,7 @@ private fun TrashRow(
             Text(recordRangeText(record), fontSize = 12.sp, color = TextSecondary)
             Spacer(Modifier.height(2.dp))
             Text(
-                "${formatMinutesHm(record.minutes)} · ${deletedAgoText(entry.deletedAt)}删除",
+                "${formatMinutesCompact(record.minutes)} · ${deletedAgoText(entry.deletedAt)}删除",
                 fontSize = 11.sp,
                 color = TextPlaceholder,
             )
@@ -563,40 +558,14 @@ private fun TrashRow(
     }
 }
 
-/** 「刚刚 / 12 分钟前 / 3 小时前 / 5 天前」 */
+/** 「刚刚 / 12min 前 / 3h 前 / 5 天前」 */
 private fun deletedAgoText(deletedAt: Long, now: Long = System.currentTimeMillis()): String {
     val minutes = (now - deletedAt) / 60_000L
     return when {
         minutes < 1 -> "刚刚"
-        minutes < 60 -> "$minutes 分钟前"
-        minutes < 60 * 24 -> "${minutes / 60} 小时前"
+        minutes < 60 -> "${minutes}min 前"
+        minutes < 60 * 24 -> "${minutes / 60}h 前"
         else -> "${minutes / (60 * 24)} 天前"
-    }
-}
-
-/** 多选勾选标记：空心圆 → 实心 + 白勾 */
-@Composable
-private fun SelectMark(selected: Boolean) {
-    Box(
-        modifier = Modifier
-            .size(20.dp)
-            .clip(CircleShape)
-            .background(if (selected) Primary else Color.Transparent)
-            .border(
-                width = 1.5.dp,
-                color = if (selected) Color.Transparent else DividerColor,
-                shape = CircleShape,
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (selected) {
-            Icon(
-                Icons.Default.Check,
-                contentDescription = null,
-                tint = Color.White,
-                modifier = Modifier.size(13.dp),
-            )
-        }
     }
 }
 
@@ -671,7 +640,7 @@ private fun TrashTaskRow(
                     if (recordCount == 0) {
                         append("暂无记录")
                     } else {
-                        append("$recordCount 条记录 · ${formatMinutesHm(recordMinutes)}")
+                        append("$recordCount 条记录 · ${formatMinutesCompact(recordMinutes)}")
                     }
                     append(" · ${deletedAgoText(entry.deletedAt)}删除")
                     if (recordCount > 0) append(if (expanded) " · 收起" else " · 查看")
@@ -718,7 +687,7 @@ private fun TrashTaskRecords(entry: TrashedTask, own: List<FocusRecord>) {
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    formatMinutesHm(record.minutes),
+                    formatMinutesCompact(record.minutes),
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium,
                     color = TextPrimary,
